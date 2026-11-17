@@ -1555,7 +1555,12 @@ const linker = {
       for (const n of candidatos) { el = form.querySelector('[name="' + n + '"]'); if (el) break; }
       if (!el) return;
       if (el.value && el.value.trim() !== '') return;   /* não sobrescreve */
-      if (linker._setCampo(el, valor)) preenchidos++;
+      /* peso, altura, acomodação… vieram de outro registro: amarelo */
+      const rot = info.fontes && info.fontes[chaveDados];
+      const origem = (rot && rot !== 'cadastro de pacientes' && typeof heranca !== 'undefined')
+        ? { de: rot, mod: '', id: '', data: '' } : null;
+      const ok = origem ? heranca.com(origem, () => linker._setCampo(el, valor)) : linker._setCampo(el, valor);
+      if (ok) preenchidos++;
     });
 
     if (preenchidos > 0) {
@@ -1706,7 +1711,15 @@ const linker = {
 
   /* Define o valor de um campo respeitando <select> (com casamento tolerante,
      ex.: sexo "M" ↔ "Masculino"). Retorna true se conseguiu aplicar. */
+  /* Todo preenchimento automático passa aqui. Com uma origem ativa
+     (heranca.com), o campo preenchido fica em amarelo: dado de registro
+     anterior, até ser revisado ou atualizado. */
   _setCampo(el, valor) {
+    const ok = linker._setCampoBruto(el, valor);
+    if (ok) { try { if (typeof heranca !== 'undefined') heranca.aoPreencher(el); } catch (e) {} }
+    return ok;
+  },
+  _setCampoBruto(el, valor) {
     valor = String(valor);
     if (el.tagName === 'SELECT') {
       const opts = Array.from(el.options);
@@ -1944,13 +1957,19 @@ const linker = {
       caseId: opts.caseId || pre._caseId || '', caseKey: opts.caseKey || pre._caseKey || ''
     });
 
-    /* Preenche apenas campos vazios da ficha (não sobrescreve o que já há) */
+    /* Preenche apenas campos vazios da ficha (não sobrescreve o que já há).
+       O que vem da pré entra em amarelo: dado anterior até ser revisado. */
+    let origemPre = null;
+    try { if (typeof heranca !== 'undefined') origemPre = heranca.origemDe('pre', pre); } catch (e) {}
     const setSe = (name, val) => {
       if (val == null || val === '') return;
       const el = form.querySelector('[name="' + name + '"]');
       /* _setCampo em vez de el.value = val: convênio e sexo são <select> e
          atribuição crua não casa "Unimed"/"Masculino" com a opção certa. */
-      if (el && !el.value) linker._setCampo(el, val);
+      if (el && !el.value) {
+        if (origemPre) heranca.com(origemPre, () => linker._setCampo(el, val));
+        else linker._setCampo(el, val);
+      }
     };
     /* Dados do paciente e clínicos vindos da Pré-anestésica */
     setSe('paciente_nasc', pre.nasc || pre.nascimento);

@@ -397,6 +397,12 @@ const autocomplete = {
         linker.autoPreencherDadosPaciente(p.nome, MOD, opts);
         if (MOD === 'anestesia') linker.importarPreParaAnestesia(p.nome, opts);
         try { rascunhos.renomearAba(MOD); } catch (e) {}
+        /* atendimento NOVO: oferece o pré-lançamento e os registros anteriores */
+        try {
+          if (typeof heranca !== 'undefined') {
+            setTimeout(() => heranca.sugerir(MOD, Object.assign({}, p, { _patientRef: patientRef, _patientKey: identityKey })), 350);
+          }
+        } catch (e) {}
       }
     } catch (e) {}
   },

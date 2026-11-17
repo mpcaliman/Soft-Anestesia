@@ -3315,6 +3315,8 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
 }
 .print-preview-overlay.show { display: flex; }
 /* via do paciente: as retificações ficam fora da folha (ver printPreview.incluirRetificacoes) */
+.campo-herdado { background: #fff4b8 !important; color: #3a2c00 !important; box-shadow: inset 0 0 0 1px #e0b52b; }
+.herdado-revisado { position: absolute; z-index: 9999; display: none; background: #fff4b8; border: 1px solid #e0b52b; color: #6b4e00; }
 #ppp.pp-sem-retif .pp-retificacao-bloco, #ppp.pp-sem-retif .pp-retificacao-nota, #ppp.pp-sem-retif .pp-retificacao { display: none; }
 .print-preview-toolbar {
   background: #2d3748;
@@ -4912,7 +4914,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-17b</b><br>
+    v7.1 · build <b id="build-tag">2026-11-17c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9595,7 +9597,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-3 required"><label>Data <span class="req">*</span></label><input type="date" name="data" data-required></div>
             <div class="field col-3"><label>Hora</label><input type="time" name="hora"></div>
             <div class="field col-3"><label>Tipo</label>
-              <select name="tipo"><option value="">—</option><option>Cirurgia</option><option>Pré-anestésico</option><option>Consulta</option><option>Procedimento</option><option>Recuperação SRPA</option></select>
+              <select name="tipo" onchange="agenda._mostrarModalidade()"><option value="">—</option><option>Cirurgia</option><option>Pré-anestésico</option><option>Consulta</option><option>Procedimento</option><option>Recuperação SRPA</option></select>
+            </div>
+            <div class="field col-3" id="ag-modalidade-wrap" style="display:none"><label>Modalidade da consulta</label>
+              <select name="modalidade"><option value="">—</option><option value="pre">Pré-anestésica</option><option value="consulta_geral">Consulta geral</option><option value="consulta_dor">Consulta de dor</option></select>
             </div>
             <div class="field col-3"><label>Status</label>
               <select name="status"><option value="agendado">Agendado</option><option value="confirmado">Confirmado</option><option value="realizado">Realizado</option><option value="cancelado">Cancelado</option></select>
@@ -9647,7 +9652,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
       <div class="field" style="grid-column:auto"><label>Tipo</label>
         <select id="ag-f-tipo" onchange="agenda.render()">
-          <option value="">Todos</option><option>Cirurgia</option><option>Pré-anestésico</option><option>Consulta</option><option>Procedimento</option><option>Recuperação SRPA</option>
+          <option value="">Todos</option><option>Cirurgia</option><option>Pré-anestésico</option><option>Consulta</option><option value="Consulta|pre">Consulta · Pré-anestésica</option><option value="Consulta|consulta_geral">Consulta · Geral</option><option value="Consulta|consulta_dor">Consulta · Dor</option><option>Procedimento</option><option>Recuperação SRPA</option>
         </select>
       </div>
       <div class="field" style="grid-column:auto"><label>Status</label>
@@ -10950,6 +10955,11 @@ const utils = {
         nomeInput.dataset.patientKey = data._patientKey || '';
       }
     } catch (e) {}
+    /* o que ainda era dado anterior volta em amarelo */
+    try {
+      const modH = String(formId).replace(/^form-/, '');
+      if (typeof heranca !== 'undefined' && heranca.MODS.indexOf(modH) >= 0) heranca.restaurar(modH, data._herdados);
+    } catch (e) {}
   },
   /* Limpa um <form> */
   /* ---- CAIXA DE TEXTO QUE CRESCE COM O TEXTO ------------------------------
@@ -11020,6 +11030,7 @@ const utils = {
     });
     f.querySelectorAll('[readonly]').forEach(el => el.value = '');
     f.querySelectorAll('.field.invalid').forEach(fi => fi.classList.remove('invalid'));
+    try { if (typeof heranca !== 'undefined') heranca.limpar(String(formId).replace(/^form-/, '')); } catch (e) {}
   },
   /* Validação básica */
   validar(formId) {
@@ -17286,6 +17297,214 @@ const prontuario = {
   limpar(mod) { prontuario._docs[mod] = []; prontuario.render(mod); }
 };
 
+/* ============================================================================
+   DADO ANTIGO EM AMARELO — o que veio de um registro anterior
+   Ao começar um atendimento, o que é trazido do pré-lançamento, da pré, da
+   consulta ou da ficha anterior entra em AMARELO, com a origem ao passar o
+   dedo. Editar o campo tira o amarelo: passou a ser dado atualizado.
+   "✓ Revisado" tira o amarelo sem redigitar — conferido, continua igual.
+   O documento grava, por campo, de onde veio e em que estado ficou
+   (_herdados), para o auditor saber o que é antigo e o que foi atualizado.
+   Só a via INTERNA mostra isso; a via do paciente sai limpa.
+============================================================================ */
+const heranca = {
+  MODS: ['pre', 'consulta', 'anestesia'],
+  /* identificação não é "dado antigo": é a mesma pessoa */
+  _IDENTIDADE: ['nome', 'paciente_nome', 'cpf', 'rg', 'nascimento', 'nasc', 'paciente_nasc', 'sexo', 'paciente_sexo',
+    'prontuario', 'paciente_prontuario', 'nome_mae', 'nome_pai', 'telefone', 'email', 'endereco', 'carteirinha',
+    'matricula', 'convenio', 'plano', 'paciente_convenio', 'data', 'data_anestesia', 'idade', 'paciente_idade',
+    'responsavel_legal', 'responsavel_parentesco', 'responsavel_sao_os_pais', '_patientKey', '_patientRef', '_caseId', '_caseKey'],
+  _origem: null,
+  _form(mod) { return document.getElementById('form-' + mod); },
+  _modDoForm(f) { const id = (f && f.id) || ''; const m = id.replace(/^form-/, ''); return heranca.MODS.indexOf(m) >= 0 ? m : ''; },
+  /* executa fn com a origem ativa: todo campo preenchido por linker._setCampo
+     nesse intervalo fica marcado */
+  com(origem, fn) {
+    const ant = heranca._origem;
+    heranca._origem = origem || null;
+    try { return fn(); } finally { heranca._origem = ant; }
+  },
+  origemDe(mod, doc, rotulo) {
+    if (!doc) return null;
+    let data = '';
+    try { data = String(historico._dataItem(doc) || '').slice(0, 10); } catch (e) {}
+    const ROT = { pre: 'Pré-anestésica', consulta: 'Consulta', anestesia: 'Ficha de anestesia', recuperacao: 'SRPA' };
+    return { de: rotulo || ROT[mod] || mod, mod, id: doc._id || '', data, aberto: !doc._finalizado };
+  },
+  _rotuloOrigem(o) {
+    return (o.de || 'registro anterior') + (o.data ? ' de ' + utils.formatarData(o.data) : '');
+  },
+  /* chamado por linker._setCampo depois de preencher */
+  aoPreencher(el) {
+    const o = heranca._origem;
+    if (!o || !el || !el.name) return;
+    const f = el.closest && el.closest('form');
+    if (!heranca._modDoForm(f)) return;
+    if (heranca._IDENTIDADE.indexOf(el.name.replace(/\[\]$/, '')) >= 0) return;
+    heranca._marcar(el, { de: o.de, mod: o.mod, id: o.id, data: o.data, estado: 'herdado' });
+  },
+  _marcar(el, info) {
+    el.classList.add('campo-herdado');
+    el.dataset.herdado = JSON.stringify(info);
+    el.title = '🟨 Dado de ' + heranca._rotuloOrigem(info) + ' — edite para atualizar ou toque em "✓ Revisado"';
+  },
+  _desmarcar(el, estado) {
+    let info = {};
+    try { info = JSON.parse(el.dataset.herdado || '{}'); } catch (e) {}
+    el.classList.remove('campo-herdado');
+    if (estado) { info.estado = estado; el.dataset.herdado = JSON.stringify(info); }
+    else delete el.dataset.herdado;
+    if (el.title && el.title.indexOf('🟨') === 0) el.title = '';
+    heranca._esconderBotao();
+  },
+  pendentes(mod) {
+    const f = heranca._form(mod);
+    return f ? Array.from(f.querySelectorAll('.campo-herdado')) : [];
+  },
+  /* o que vai gravado no documento */
+  coletar(mod) {
+    const f = heranca._form(mod);
+    const out = {};
+    if (!f) return out;
+    f.querySelectorAll('[data-herdado]').forEach(el => {
+      if (!el.name) return;
+      try { out[el.name] = JSON.parse(el.dataset.herdado); } catch (e) {}
+    });
+    return out;
+  },
+  /* reabrir o documento: o que ainda era antigo volta amarelo */
+  restaurar(mod, mapa) {
+    heranca.limpar(mod);
+    const f = heranca._form(mod);
+    if (!f || !mapa || typeof mapa !== 'object') return;
+    Object.keys(mapa).forEach(nome => {
+      const el = f.querySelector('[name="' + (window.CSS && CSS.escape ? CSS.escape(nome) : nome) + '"]');
+      const info = mapa[nome];
+      if (!el || !info) return;
+      if (info.estado === 'herdado') heranca._marcar(el, info);
+      else el.dataset.herdado = JSON.stringify(info);
+    });
+  },
+  limpar(mod) {
+    const f = heranca._form(mod);
+    if (!f) return;
+    f.querySelectorAll('[data-herdado]').forEach(el => {
+      el.classList.remove('campo-herdado');
+      delete el.dataset.herdado;
+      if (el.title && el.title.indexOf('🟨') === 0) el.title = '';
+    });
+    heranca._esconderBotao();
+  },
+  /* antes de finalizar: há dado antigo que ninguém conferiu? */
+  confirmarAntesDeFinalizar(mod) {
+    const p = heranca.pendentes(mod);
+    if (!p.length) return true;
+    const nomes = p.slice(0, 6).map(el => '• ' + heranca._rotuloCampo(el)).join('\n');
+    return confirm('🟨 ' + p.length + ' campo(s) em amarelo vieram de registro anterior e não foram revisados:\n\n' + nomes +
+      (p.length > 6 ? '\n• …' : '') + '\n\nOK = finalizar assim mesmo (fica registrado como dado anterior não revisado)\nCancelar = voltar e revisar');
+  },
+  _rotuloCampo(el) {
+    const fld = el.closest && el.closest('.field');
+    const lb = fld && fld.querySelector('label');
+    return String((lb && lb.textContent) || el.name || '').replace(/\s+/g, ' ').replace(/\*/g, '').trim();
+  },
+  /* resumo para a via interna */
+  resumo(doc) {
+    const m = doc && doc._herdados;
+    if (!m || typeof m !== 'object') return [];
+    return Object.keys(m).map(nome => Object.assign({ campo: nome }, m[nome]));
+  },
+  /* ---- botão "✓ Revisado" que acompanha o campo amarelo em foco ---- */
+  _botao: null, _alvo: null,
+  _mostrarBotao(el) {
+    let b = heranca._botao;
+    if (!b) {
+      b = document.createElement('button');
+      b.type = 'button'; b.id = 'herdado-revisado';
+      b.className = 'btn btn-xs herdado-revisado';
+      b.textContent = '✓ Revisado';
+      b.addEventListener('mousedown', e => e.preventDefault());
+      b.addEventListener('click', () => { if (heranca._alvo) heranca._desmarcar(heranca._alvo, 'revisado'); try { markDirty(); } catch (e) {} });
+      document.body.appendChild(b);
+      heranca._botao = b;
+    }
+    heranca._alvo = el;
+    const r = el.getBoundingClientRect();
+    b.style.top = (window.scrollY + r.top - 26) + 'px';
+    b.style.left = (window.scrollX + Math.max(4, r.right - 96)) + 'px';
+    b.style.display = 'block';
+  },
+  _esconderBotao() { if (heranca._botao) heranca._botao.style.display = 'none'; heranca._alvo = null; },
+  instalar() {
+    if (heranca._instalado) return;
+    heranca._instalado = true;
+    /* só a digitação de quem usa tira o amarelo: o preenchimento automático
+       também dispara "input", e não pode apagar a marca que acabou de pôr */
+    const aoEditar = e => {
+      const el = e.target;
+      if (!e.isTrusted || !el || !el.classList || !el.classList.contains('campo-herdado')) return;
+      heranca._desmarcar(el, 'atualizado');
+    };
+    document.addEventListener('input', aoEditar, true);
+    document.addEventListener('change', aoEditar, true);
+    document.addEventListener('focusin', e => {
+      const el = e.target;
+      if (el && el.classList && el.classList.contains('campo-herdado')) heranca._mostrarBotao(el);
+      else if (el !== heranca._botao) heranca._esconderBotao();
+    });
+  },
+
+  /* ---- ao escolher o paciente num atendimento NOVO: o que já existe? ---- */
+  _jaSugerido: {},
+  sugerir(mod, paciente) {
+    if (heranca.MODS.indexOf(mod) < 0 || !paciente) return;
+    const f = heranca._form(mod);
+    if (!f) return;
+    const idEl = f.querySelector('[name="_id"]') || f.querySelector('[name="id"]');
+    if (idEl && idEl.value) return;                       /* documento já existente */
+    const nome = paciente.nome || paciente.label || '';
+    const chave = mod + '|' + (paciente._patientRef || paciente._id || '') + '|' + utils.semAcento(nome);
+    if (heranca._jaSugerido[chave]) return;
+    heranca._jaSugerido[chave] = true;
+    const pseudo = { paciente: nome, _patientRef: paciente._patientRef || paciente._id || '', _patientKey: paciente._patientKey || '' };
+    let ant = [];
+    try { ant = agenda._anteriores(pseudo, mod); } catch (e) { ant = []; }
+    if (!ant.length) return;
+    heranca._ant = ant; heranca._antMod = mod;
+    const e = utils.escapeHTML;
+    const linhas = ant.map((a, i) => {
+      const destaque = a.mod === mod && a.aberto;
+      const quando = a.data ? utils.formatarData(a.data) : 'sem data';
+      const estado = a.aberto ? 'em aberto (pré-lançamento)' : 'finalizada';
+      const botao = destaque
+        ? '<button class="btn btn-primary btn-sm" onclick="modal.close(); heranca._continuar(' + utils.jsArg(i) + ')">▶ Continuar este</button>'
+        : '<button class="btn btn-sm" onclick="modal.close(); heranca._usar(' + utils.jsArg(i) + ')">📋 Usar dados</button>';
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border:1px solid ' + (destaque ? 'var(--primary)' : 'var(--border)') + ';border-radius:8px;margin-bottom:6px;background:' + (destaque ? 'var(--primary-soft)' : 'transparent') + '">' +
+        '<div style="font-size:.86rem">' + (destaque ? '⭐ ' : '') + '<b>' + e(agenda._ROT_MOD[a.mod] || a.mod) + '</b> — ' + e(quando) + ' · <span style="color:var(--text-mute)">' + e(estado) + '</span></div>' + botao + '</div>';
+    }).join('');
+    modal.open('📂 Já existem registros de ' + (nome || 'este paciente'),
+      '<p style="font-size:.86rem;margin:0 0 10px"><b>Continuar</b> abre o pré-lançamento como foi deixado. <b>Usar dados</b> traz os campos equivalentes para este atendimento novo — o que vier entra em <span class="campo-herdado" style="padding:0 4px;border-radius:4px">amarelo</span> até ser revisado ou atualizado. O registro antigo não é alterado.</p>' + linhas,
+      '<button class="btn" onclick="modal.close()">Não usar</button>');
+  },
+  _continuar(i) {
+    const a = (heranca._ant || [])[Number(i)];
+    if (!a) return;
+    const alvo = { pre, consulta, anestesia }[a.mod];
+    try { alvo.carregar(store.getById(a.mod, a.doc._id) || a.doc); toast('▶ Continuando o pré-lançamento de ' + (agenda._ROT_MOD[a.mod] || a.mod)); }
+    catch (e) { toast('Não consegui abrir o pré-lançamento', 'error'); }
+  },
+  _usar(i) {
+    const a = (heranca._ant || [])[Number(i)];
+    const mod = heranca._antMod;
+    if (!a || !mod) return;
+    const doc = store.getById(a.mod, a.doc._id) || a.doc;
+    const ctx = linker.contextoPaciente(mod);
+    const n = agenda._aplicarFonte(mod, a.mod, doc, { identityKey: ctx.identityKey, patientRef: ctx.patientRef });
+    toast('📋 ' + (n ? 'Campos trazidos' : 'Nada a completar') + ' de ' + (agenda._ROT_MOD[a.mod] || a.mod) + (a.data ? ' de ' + utils.formatarData(a.data) : '') + (n ? ' — em amarelo até revisar' : ''));
+  }
+};
+try { if (document.readyState !== 'loading') heranca.instalar(); else document.addEventListener('DOMContentLoaded', () => heranca.instalar()); } catch (e) {}
+
 const pre = {
   formId: 'form-pre',
   _linkPendente: null,
@@ -18084,6 +18303,12 @@ const pre = {
       if (previo && previo._finalizado) { adendos.salvarComoCorrecao('pre', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
+    /* dado anterior em amarelo, sem revisão: pergunta antes de assinar */
+    if (finalizar && !opts._herdOk) {
+      if (!heranca.confirmarAntesDeFinalizar('pre')) return;
+      opts._herdOk = true;
+    }
+    { const hd = heranca.coletar('pre'); if (Object.keys(hd).length) data._herdados = hd; }
     /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
     if (finalizar && !opts._dupOk &&
         duplicados.perguntar('pre', data, () => pre.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
@@ -18958,6 +19183,12 @@ const consulta = {
       if (previo && previo._finalizado) { adendos.salvarComoCorrecao('consulta', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
+    /* dado anterior em amarelo, sem revisão: pergunta antes de assinar */
+    if (finalizar && !opts._herdOk) {
+      if (!heranca.confirmarAntesDeFinalizar('consulta')) return;
+      opts._herdOk = true;
+    }
+    { const hd = heranca.coletar('consulta'); if (Object.keys(hd).length) data._herdados = hd; }
     /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
     if (finalizar && !opts._dupOk &&
         duplicados.perguntar('consulta', data, () => consulta.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
@@ -19315,6 +19546,21 @@ const recuperacao = {
       if (previo && previo._finalizado) { adendos.salvarComoCorrecao('recuperacao', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
+    /* A SRPA É DO MESMO ATENDIMENTO QUE A FICHA.
+       Feita pelo módulo SRPA (e não pelo "Fazer SRPA junto" da ficha), ela
+       nascia com um caso próprio: o Meu dia mostrava a ficha com "— SRPA" e a
+       SRPA em lugar nenhum. Ficha do mesmo paciente no mesmo dia, uma só: a
+       SRPA entra no caso dela. */
+    try {
+      const ficha = recuperacao._fichaDoAtendimento(data);
+      if (ficha) {
+        if (!recuperacao._linkPendente) recuperacao._linkPendente = { mod: 'anestesia', id: ficha._id };
+        if (ficha._caseId) data._caseId = ficha._caseId;
+        if (ficha._caseKey) data._caseKey = ficha._caseKey;
+        if (!data._patientRef && ficha._patientRef) data._patientRef = ficha._patientRef;
+        if (!data._patientKey && ficha._patientKey) data._patientKey = ficha._patientKey;
+      }
+    } catch (e) {}
     /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
     if (finalizar && !opts._dupOk &&
         duplicados.perguntar('recuperacao', data, () => recuperacao.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
@@ -19337,6 +19583,28 @@ const recuperacao = {
        vira ruído e a pessoa para de ler todos os avisos, inclusive os que
        importam. O selo da ficha já mostra o estado. */
     store.notificarNuvem(saved, finalizar ? 'Recuperação finalizada' : 'Recuperação', { silencioso: !!opts.auto });
+  },
+  _fichaDoAtendimento(data) {
+    const dia = String(data.data || '').slice(0, 10);
+    if (!dia) return null;
+    /* vínculo explícito vale primeiro */
+    const lp = recuperacao._linkPendente;
+    if (lp && lp.mod === 'anestesia') return store.getById('anestesia', lp.id);
+    const ligada = data._links && data._links.anestesia_id;
+    if (ligada) return store.getById('anestesia', ligada);
+    const norm = s => linker._normNome(s || '');
+    const nome = norm(data.nome);
+    const chave = linker._chavePaciente(data);
+    const ref = data._patientRef || data._paciente_id || '';
+    const doDia = (store.list('anestesia') || []).filter(a => {
+      if (!a || !a._id) return false;
+      if (String(historico._dataItem(a) || '').slice(0, 10) !== dia) return false;
+      if (ref && (a._patientRef === ref || a._paciente_id === ref)) return true;
+      const ca = linker._chavePaciente(a);
+      if (chave && ca) return ca === chave;
+      return !!nome && norm(a.paciente && a.paciente.nome) === nome;
+    });
+    return doDia.length === 1 ? doDia[0] : null;
   },
   /* Faixa de totais no topo da SRPA (tempo, Aldrete). */
   resumoTopo() {
@@ -42309,6 +42577,12 @@ const anestesia = {
       if (previo && previo._finalizado) { adendos.salvarComoCorrecao('anestesia', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
+    /* dado anterior em amarelo, sem revisão: pergunta antes de assinar */
+    if (finalizar && !opts._herdOk) {
+      if (!heranca.confirmarAntesDeFinalizar('anestesia')) return;
+      opts._herdOk = true;
+    }
+    { const hd = heranca.coletar('anestesia'); if (Object.keys(hd).length) data._herdados = hd; }
     /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
     if (finalizar && !opts._dupOk &&
         duplicados.perguntar('anestesia', data, () => anestesia.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
@@ -42867,6 +43141,7 @@ const anestesia = {
     item = adendos.vigente('anestesia', item);
     anestesia.limparSilencioso();
     anestesia.restaurarEstruturado(item);
+    try { heranca.restaurar('anestesia', item._herdados); } catch (e) {}
     /* DOIS FORMATOS DE FICHA, E `carregar` SÓ ENXERGAVA UM.
        `restaurarEstruturado` lê o documento em blocos (`paciente.nome`,
        `procedimento.descricao`), que é o que o formulário produz. As fichas do
@@ -44577,8 +44852,14 @@ const fin = {
           else docCobranca.convenio = conv;
         }
       } catch (e) { docCobranca = doc; }
-      const fr = fin.fromDoc(ctx.mod, docCobranca);
-      if (!fr || !fr.item) { if (ctx.aoFechar) ctx.aoFechar(null, opts); return; }
+      const fr = fin.fromDoc(ctx.mod, docCobranca, { explicito: true });
+      if (!fr || !fr.item) {
+        /* A JANELA FECHAVA CALADA. "Gerar lançamento" sem lançamento e sem
+           aviso é o pior dos mundos: parece feito e o Meu dia segue cobrando. */
+        toast('💰 O lançamento NÃO foi gerado: ' + (fin._motivo || 'motivo desconhecido') + '.', 'error');
+        if (ctx.aoFechar) ctx.aoFechar(null, opts);
+        return;
+      }
 
       item = store.getById('financeiro', fr.item._id) || fr.item;
       }
@@ -44682,15 +44963,17 @@ const fin = {
      lê este motivo. */
   _motivo: '',
   _recusar(motivo) { fin._motivo = motivo; return null; },
-  fromDoc(modOrigem, doc) {
+  fromDoc(modOrigem, doc, opts = {}) {
     fin._motivo = '';
-    if (!fin.isAutoEnabled()) return fin._recusar('o lançamento automático está desligado em Ajustes');
+    /* "Gerar lançamento" clicado na janela é pedido explícito: o interruptor
+       do AUTOMÁTICO não vale para ele */
+    if (!opts.explicito && !fin.isAutoEnabled()) return fin._recusar('o lançamento automático está desligado em Ajustes');
     if (!doc || !doc._id) return fin._recusar('o atendimento não foi encontrado');
     if (doc._relOrg && doc._relOrg !== cloudRel._org()) return fin._recusar('o atendimento é de outra clínica');
     /* "Não gerar" foi uma decisão dele na finalização: uma gravação posterior
        não pode ressuscitar a cobrança por conta própria. */
     const atual = store.getById(modOrigem, doc._id) || doc;
-    if (fin.finalizacao.decisaoDe(atual) === false &&
+    if (!opts.explicito && fin.finalizacao.decisaoDe(atual) === false &&
         !store.list('financeiro').some(f => f._origemId === doc._id)) {
       return fin._recusar('ao finalizar, foi decidido NÃO cobrar este atendimento');
     }
@@ -54007,6 +54290,15 @@ const agenda = {
       document.querySelector(`#${agenda.formId} [name="status"]`).value = 'agendado';
       document.getElementById('agenda-form-titulo').textContent = 'Novo compromisso';
     }
+    agenda._mostrarModalidade();
+  },
+  /* Consulta: pré-anestésica, geral ou dor — decide o que o Atender abre */
+  _mostrarModalidade() {
+    const f = document.getElementById(agenda.formId);
+    const w = document.getElementById('ag-modalidade-wrap');
+    if (!f || !w) return;
+    const ehConsulta = ((f.querySelector('[name="tipo"]') || {}).value || '') === 'Consulta';
+    w.style.display = ehConsulta ? '' : 'none';
   },
   cancelar() {
     document.getElementById(agenda.cardId).style.display = 'none';
@@ -54017,6 +54309,7 @@ const agenda = {
     const data = utils.formData(agenda.formId);
     if (data.id) data._id = data.id;
     delete data.id;
+    if (data.tipo !== 'Consulta') data.modalidade = '';
     const saved = store.save('agenda', data);
     store.notificarNuvem(saved, 'Compromisso');
     agenda.cancelar();
@@ -54219,7 +54512,17 @@ const agenda = {
     const tipo = (ag.tipo || '').toLowerCase();
     let destino, label;
     if (tipo === 'cirurgia') { destino = 'anestesia'; label = 'Ficha de Anestesia'; }
-    else if (tipo === 'consulta') { destino = 'consulta'; label = 'Consulta'; }
+    else if (tipo === 'consulta' && ag.modalidade === 'pre') { destino = 'pre'; label = 'Pré-anestésica'; }
+    else if (tipo === 'consulta' && (ag.modalidade === 'consulta_geral' || ag.modalidade === 'consulta_dor')) { destino = 'consulta'; label = 'Consulta'; }
+    else if (tipo === 'consulta') {
+      /* consulta sem modalidade: pergunta qual das três, e guarda a escolha */
+      const b = (m, rot, cls) => '<button class="btn' + (cls ? ' ' + cls : '') + '" onclick="modal.close(); agenda._definirModalidade(' + utils.jsArg(ag._id) + ',' + utils.jsArg(m) + ')">' + rot + '</button>';
+      modal.open('Qual consulta?',
+        '<p style="margin-bottom:12px">Que tipo de consulta é a de <strong>' + utils.escapeHTML(ag.paciente || '') + '</strong>?</p>' +
+        '<div style="display:flex;flex-direction:column;gap:8px">' +
+        b('pre', '📋 Pré-anestésica', 'btn-primary') + b('consulta_geral', '🩺 Consulta geral') + b('consulta_dor', '💢 Consulta de dor') + '</div>', '');
+      return;
+    }
     else if (tipo === 'pré-anestésico' || tipo === 'pre-anestesico' || tipo === 'pré anestésico') { destino = 'pre'; label = 'Pré-anestésica'; }
     else if (tipo === 'recuperação srpa' || tipo === 'recuperacao srpa' || tipo === 'srpa') { destino = 'recuperacao'; label = 'Recuperação SRPA'; }
     else if (tipo === 'procedimento') {
@@ -54278,6 +54581,15 @@ const agenda = {
     /* o pré-lançamento do mesmo tipo vem primeiro; depois do mais recente */
     out.sort((a, b) => ((b.mod === destino && b.aberto) - (a.mod === destino && a.aberto)) || String(b.data).localeCompare(String(a.data)));
     return out.slice(0, 8);
+  },
+  _definirModalidade(id, modalidade) {
+    const ag = store.getById('agenda', id);
+    if (!ag) return;
+    ag.modalidade = modalidade;
+    const saved = store.save('agenda', ag);
+    try { store.notificarNuvem(saved, 'Compromisso'); } catch (e) {}
+    try { agenda.render(); } catch (e) {}
+    agenda._iniciarAtendimento(id, modalidade === 'pre' ? 'pre' : 'consulta');
   },
   _iniciarAtendimento(idAgenda, destino) {
     const ag = store.getById('agenda', idAgenda);
@@ -54361,11 +54673,12 @@ const agenda = {
           paciente_prontuario: 'prontuario', pre_comorbidades: 'comorbidades', pre_alergias: 'alergias', pre_medicacoes: 'medicacoes', pre_exames: 'exames_compl' }
       : null;
     let n = 0;
+    const origem = heranca.origemDe(fonteMod, fonteDoc);
     const por = (nomeCampo, valor) => {
       if (valor == null || valor === '' || typeof valor === 'object') return;
       const el = f.querySelector('[name="' + nomeCampo + '"]');
       if (!el || el.value) return;
-      try { linker._setCampo(el, valor); } catch (e) { el.value = valor; }
+      try { heranca.com(origem, () => linker._setCampo(el, valor)); } catch (e) { el.value = valor; }
       n++;
     };
     if (alias) Object.keys(alias).forEach(k => por(k, src[alias[k]]));
@@ -54443,6 +54756,10 @@ const agenda = {
             set('convenio', ag.convenio);
             set('profissional', ag.cirurgiao);
             set('data', ag.data);
+            /* modalidade da agenda → tipo de atendimento (vai para o Financeiro) */
+            if (ag.modalidade === 'consulta_dor' || ag.modalidade === 'consulta_geral') {
+              const ta = f.querySelector('[name="tipo_atendimento"]'); if (ta) ta.value = ag.modalidade;
+            }
             setTimeout(() => linker.autoPreencherDadosPaciente(ag.paciente, 'consulta', contextoPaciente), 100);
           }
         } else if (destino === 'recuperacao') {
