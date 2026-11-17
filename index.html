@@ -3314,6 +3314,8 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   flex-direction: column;
 }
 .print-preview-overlay.show { display: flex; }
+/* via do paciente: as retificações ficam fora da folha (ver printPreview.incluirRetificacoes) */
+#ppp.pp-sem-retif .pp-retificacao-bloco, #ppp.pp-sem-retif .pp-retificacao-nota, #ppp.pp-sem-retif .pp-retificacao { display: none; }
 .print-preview-toolbar {
   background: #2d3748;
   color: #fff;
@@ -4910,7 +4912,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-15a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-17a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10437,6 +10439,9 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       Carimbo:
       <select id="ppt-signature-select" onchange="printPreview.refreshSignature(true)"></select>
     </label>
+    <label style="font-size:.78rem;color:#fff;display:flex;align-items:center;gap:6px" title="Desligado: a folha sai como o original, já com as correções nos campos (via do paciente). Ligado: inclui as retificações — quem corrigiu, quando e o que mudou (via do prontuário).">
+      <input type="checkbox" id="ppt-retif" onchange="printPreview.alternarRetificacoes(this.checked)"> 📋 Incluir retificações (uso interno)
+    </label>
     <span id="ppt-filename" style="font-size:.72rem;color:#cbd5e0;background:rgba(255,255,255,.08);padding:4px 10px;border-radius:4px;white-space:nowrap"></span>
     <button class="btn btn-success" onclick="printPreview.imprimir()" title="Abre a janela de impressão do aparelho — escolha a impressora (AirPrint) para papel ou 'Salvar em PDF'"><span class="icon">🖨️</span> Imprimir / PDF</button>
     <button class="btn" onclick="spdata.abrir()" title="Levar este documento ao SP Data do hospital: a evolução em texto para colar e o PDF para a área de anexos"><span class="icon">🏥</span> SP Data</button>
@@ -10444,7 +10449,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" onclick="printPreview.fechar()">✕ Fechar</button>
   </div>
   <div class="print-preview-content">
-    <div class="print-preview-paper" id="ppp"></div>
+    <div class="print-preview-paper pp-sem-retif" id="ppp"></div>
   </div>
 </div>
 
@@ -29693,7 +29698,7 @@ const spdata = {
     if (!String(corpo || '').trim()) {
       const ppp = document.getElementById('ppp');
       if (ppp) {
-        const folha = printPreview._folhaSemTela(ppp);
+        const folha = printPreview._folhaSemTela(ppp, true);   /* SP Data é prontuário: com retificações */
         folha.style.cssText = 'position:absolute;left:-10000px;top:0;width:800px';
         document.body.appendChild(folha);
         corpo = folha.innerText || folha.textContent || '';
@@ -31653,7 +31658,7 @@ const pdfBackup = {
       let doc, nomeArq;
       try {
         ppp.innerHTML = printPreview._comporDocumento(mod, builder);
-        doc = printPreview._gerarDocDeTexto(J, ppp);
+        doc = printPreview._gerarDocDeTexto(J, ppp, true);   /* backup = prontuário: com retificações */
         nomeArq = printPreview._gerarNomeArquivo().replace(/[^\w.\-]+/g, '_') + '.pdf';
       } finally { ppp.innerHTML = guardado; }
       pdfBackup.enviarTodos(doc, nomeArq)
@@ -31810,7 +31815,7 @@ const pdfBackup = {
       const guardado = ppp.innerHTML;
       try {
         ppp.innerHTML = printPreview._comporDocumento(mod, builder);
-        const doc = printPreview._gerarDocDeTexto(J, ppp);
+        const doc = printPreview._gerarDocDeTexto(J, ppp, true);   /* backup = prontuário: com retificações */
         const nomeArq = printPreview._gerarNomeArquivo().replace(/[^\w.\-]+/g, '_') + '.pdf';
         return { doc, nomeArq };
       } finally {
