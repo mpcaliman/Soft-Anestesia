@@ -26018,6 +26018,96 @@ await test('Barra de opções também no fim da página: espelha a de cima e aci
   await page.close();
 });
 
+await test('Extrato (PDF): Coopanest e Unimed lidos, conciliados com o Financeiro, valores pagos aprendidos e usados no Gerar financeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const R = (y, ...its) => ({ y, its: its.map(([x, s]) => ({ x, s })) });
+    /* Coopanest — layout do "Movimento Detalhado", com pacientes fictícios */
+    const coop = [[
+      R(491, [30, '10-2026']),
+      R(457, [30, 'BRADESCO SAUDE']),
+      R(440, [30, 'PROCEDIMENTO']),
+      R(428, [38, 'BOLETINS'], [113, 'PACIENTE'], [203, 'HOSPITAL'], [272, 'DATA'], [311, 'CÓDIGO'], [459, 'PROCEDIMENTO'], [631, 'PORTE'], [655, 'VIA'], [680, 'VALOR'], [713, 'VALOR'], [749, 'GLOSA'], [787, 'PAGO']),
+      R(411, [40, '11110001'], [81, 'FULANA TESTE DE'], [182, 'CLINICA X'], [268, '29/06/26'], [317, '40202615'], [360, 'ENDOSCOPIA DIGESTIVA ALTA'], [643, '03'], [659, 'U'], [677, '721,88'], [718, '721,88'], [790, '721,88']),
+      R(401, [81, 'SOUZA']),
+      R(388, [40, '11110002'], [81, 'FULANA TESTE DE'], [182, 'CLINICA X'], [268, '29/06/26'], [317, '40201082'], [360, 'COLONOSCOPIA'], [643, '02'], [659, 'D'], [677, '343,32'], [718, '343,32'], [790, '343,32']),
+      R(380, [81, 'SOUZA']),
+      R(354, [40, '11110003'], [81, 'BELTRANO SEM LANCAMENTO'], [182, 'CLINICA X'], [268, '16/03/26'], [317, '40202542'], [360, 'POLIPECTOMIA'], [643, '03'], [658, 'M'], [677, '360,94'], [718, '721,88'], [790, '721,88']),
+      R(340, [317, '40202550'], [360, 'POLIPECTOMIA ESOFAGO'], [643, '03'], [658, 'M'], [677, '360,94']),
+      R(300, [712, '1.786,08'], [749, '0,00'], [784, '1.786,08'])
+    ]];
+    const c = extratoConc.parseCoopanest(coop);
+    out.coopLinhas = c.linhas.length === 4 && c.competencia === '2026-10';
+    const l0 = c.linhas[0], l1 = c.linhas[1];
+    out.coopNome = l0.paciente === 'FULANA TESTE DE SOUZA' && l0.data === '2026-06-29' && l0.codigo === '40202615' && l0.porteAn === '03' && l0.via === 'U';
+    out.coopCheio = l1.valorCheio === 490.46 && l1.pago === 343.32;
+    out.coopDividido = c.linhas[2].pago === 360.94 && c.linhas[3].pago === 360.94 && c.linhas[3].valorCheio === 721.88;
+    /* Unimed — "Espelho de Pagamento" com débito e procedimento partido */
+    const uni = [[
+      R(535, [24, 'Coop Trab Médico'], [216, 'Comp.Pagamento: 10-2026']),
+      R(442, [18, 'Eventos Pagos']),
+      R(400, [18, 'Grupo Apropriação:'], [108, 'Guias Hospitalares'], [324, 'Classe Doc. Serv:']),
+      R(389, [18, '2863541000802007'], [90, 'CICRANO DA SILVA'], [253, '4116'], [319, '5378248'], [403, '286'], [444, '10-2026'], [798, '715,80']),
+      R(378, [37, '3'], [60, '8152461'], [280, 'Anest.'], [318, '31206247'], [366, 'Reconstrução'], [504, '22/07/2026 13:10'], [564, 'Anestesista'], [618, '100%'], [656, '0.02'], [698, '1'], [726, '13,38'], [751, 'C']),
+      R(360, [37, '3'], [60, '8152461'], [280, 'Anest.'], [318, '31206247'], [366, 'Reconstrução'], [504, '22/07/2026 13:10'], [564, 'Anestesista'], [618, '100%'], [656, '0.98'], [698, '1'], [722, '702,42'], [751, 'C']),
+      R(340, [18, '2863541000802008'], [90, 'MARIA ESTORNO'], [253, '4116'], [319, '5378249'], [403, '286'], [444, '10-2026'], [798, '0,00']),
+      R(330, [37, '1'], [60, '8152462'], [280, 'Anest.'], [318, '30733030'], [366, 'Condroplastia'], [504, '04/08/2026 17:20'], [622, '50%'], [656, '1.00'], [698, '1'], [722, '454,09'], [751, 'C']),
+      R(320, [37, '1'], [60, '8152462'], [280, 'Anest.'], [318, '30733030'], [366, 'Condroplastia'], [504, '04/08/2026 17:20'], [622, '50%'], [656, '1.00'], [698, '1'], [722, '454,09'], [751, 'D']),
+      R(274, [36, 'O pagamento será realizado no dia'], [186, '06/11/2026'])
+    ]];
+    uni[0].push(R(270, [36, 'O pagamento será realizado no dia 06/11/2026 através do Banco']));
+    const u = extratoConc.parseUnimed(uni);
+    out.uniSoma = u.linhas.length === 1 && u.linhas[0].pago === 715.8 && u.linhas[0].data === '2026-07-22' && u.linhas[0].valorCheio === 715.8;
+    out.uniPagamento = u.dataPagamento === '2026-11-06' && u.competencia === '2026-10';
+    out.detecta = extratoConc.detectar([[R(500, [261, 'Movimento Detalhado Por Cooperado Com Procedimentos'])]]) === 'coopanest' &&
+      extratoConc.detectar([[R(500, [318, 'Espelho de Pagamento Prestador'])]]) === 'unimed';
+    /* conciliação com o Financeiro */
+    store.setList('financeiro', [
+      { _id: 'f1', paciente: 'Fulana Teste de Souza', data_proc: '2026-06-29', convenio: 'Bradesco Saúde', cbhpm_codigo: '40202615',
+        codigos: [{ codigo: '40202615' }, { codigo: '40201082' }], valor_previsto: 1065.20, status: 'pendente' },
+      { _id: 'f2', paciente: 'Outro Paciente Bradesco', data_proc: '2026-05-10', convenio: 'Bradesco Saúde', cbhpm_codigo: '40201082', valor_previsto: 490.45, status: 'pendente' }
+    ]);
+    const res = extratoConc.conciliar(c);
+    out.casou = res.confere.length === 1 && res.confere[0].fin._id === 'f1' && res.confere[0].linhas.length === 2;
+    out.semLanc = res.semLancamento.length === 2 && res.semLancamento.every(s => /BELTRANO/.test(s.linha.paciente));
+    out.naoVeio = res.naoVeio.length === 1 && res.naoVeio[0].fin._id === 'f2';
+    /* aplicar pela tela */
+    orcamento.salvarCfg({ valoresPagos: {}, precoPorCodigoConvenio: {} });
+    extratoConc.revisar(c);
+    document.getElementById('extrato-data').value = '2026-11-10';
+    document.querySelector('.extrato-lancar[data-i="0"]').checked = true;
+    const ap = extratoConc.aplicar();
+    const f1 = store.getById('financeiro', 'f1');
+    out.recebido = f1.status === 'recebido' && f1.valor_recebido === 1065.2 && f1.data_pagamento === '2026-11-10' && (f1._conciliacoes || []).length === 1;
+    out.lancou = ap.criados === 1 && store.list('financeiro').some(x => x._origemTipo === 'extrato' && x.status === 'recebido');
+    /* reaplicar o mesmo extrato não soma de novo */
+    const res2 = extratoConc.conciliar(c);
+    out.idempotente = res2.jaAplicado.length >= 1 && res2.confere.length === 0;
+    /* valores aprendidos → Gerar financeiro */
+    const tab = extratoConc.tabela();
+    const colono = tab.find(x => x.codigo === '40201082');
+    out.aprendeu = !!colono && colono.valor === 490.46 && colono.porteAn === '02' && ap.aprendidos >= 3;
+    out.usouNoSoft = precos.base('40201082', 'anestesia', 'Bradesco Saúde').valor === 490.46 && precos.base('40201082', 'anestesia', 'Bradesco Saúde').origem === 'codigo_convenio';
+    /* valor que ele digitou para o convênio não é sobrescrito */
+    precos.definirPorCodigoDoConvenio('bradesco', '40202615', 800);
+    extratoConc.usarNosVazios();
+    out.respeitaManual = precos.porCodigoDoConvenio('Bradesco Saúde')['40202615'] === 800;
+    extratoConc.abrirValores();
+    out.telaValores = /Valores pagos aprendidos/.test(document.getElementById('modal-title').textContent) && /40201082/.test(document.getElementById('modal-body').textContent);
+    modal.close();
+    orcamento.salvarCfg({ valoresPagos: {}, precoPorCodigoConvenio: {} });
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.coopLinhas && r.coopNome && r.coopCheio && r.coopDividido, 'Coopanest lido: ' + JSON.stringify(r));
+  assert(r.uniSoma && r.uniPagamento && r.detecta, 'Unimed lida (partido somado, débito estornado, data do pagamento): ' + JSON.stringify(r));
+  assert(r.casou && r.semLanc && r.naoVeio, 'conciliação por paciente + data + código: ' + JSON.stringify(r));
+  assert(r.recebido && r.lancou && r.idempotente, 'aplicar dá baixa, lança o que faltava e não soma duas vezes: ' + JSON.stringify(r));
+  assert(r.aprendeu && r.usouNoSoft && r.respeitaManual && r.telaValores, 'valores aprendidos viram valor do convênio no Gerar financeiro: ' + JSON.stringify(r));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
