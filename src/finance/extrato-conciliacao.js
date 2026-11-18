@@ -164,7 +164,7 @@ const extratoConc = {
         linhas.push({
           fonte: 'Coopanest', convenio: r.convenio, tipo: r.tipo, ref: 'Boletim ' + r.boletim, paciente: r.paciente,
           hospital: r.hospital, data: r.data, codigo: i.codigo, descricao: i.descricao.replace(/\s+/g, ' ').trim(),
-          porteAn: i.porteAn, via: i.via, cobrado: i.valorSemTaxa, glosa: (r.glosa || 0) * frac,
+          porteAn: i.porteAn, via: i.via, fatorVia: fator, cobrado: i.valorSemTaxa, glosa: (r.glosa || 0) * frac,
           pago: Math.round(pago * frac * 100) / 100,
           valorCheio: i.valorSemTaxa != null ? Math.round(i.valorSemTaxa / fator * 100) / 100 : null,
           base: i.via ? 'via ' + i.via + ' (' + Math.round(fator * 100) + '%)' : ''
@@ -223,6 +223,7 @@ const extratoConc = {
           const part = t.find(i => i.x > dt.x + 40 && i.x < pct.x && !/%$/.test(i.s));
           itens.push({ paciente: benef.paciente, carteira: benef.carteira, grupo: benef.grupo, solicitacao: t[1].s,
             tipoServico: tipoSrv ? tipoSrv.s : '', codigo: cod.s, descricao: desc, data: extratoConc._dataISO(dt.s),
+            hora: (dt.s.match(/\d{2}:\d{2}/) || [''])[0],
             participacao: part ? part.s : '', pct: Number(pct.s.replace('%', '')), unit: unit ? Number(unit.s) : 1,
             valor: valor ? sinal * extratoConc._num(valor.s) : 0 });
         }
@@ -241,8 +242,10 @@ const extratoConc = {
       return {
         fonte: 'Unimed', convenio: 'Unimed', tipo: g.grupo, ref: 'Solicitação ' + Array.from(g.solicitacoes).join(', '),
         paciente: g.paciente, hospital: '', data: g.data, codigo: g.codigo, descricao: g.descricao,
-        porteAn: '', via: '', pct: g.pct, unidades, cobrado: null, glosa: 0, pago: g.valor,
-        valorCheio: g.pct > 0 ? Math.round(g.valor / (g.pct / 100) / unidades * 100) / 100 : null,
+        porteAn: '', via: '', pct: g.pct, unidades, hora: g.hora || '', cobrado: null, glosa: 0, pago: g.valor,
+        /* o TOTAL é o que conta: fracionado não quer dizer 50%, e o dobro pode
+           ser apartamento ou horário — quem decide é a análise (e ele) */
+        valorCheio: null,
         base: g.pct + '%' + (unidades > 1 ? ' · ' + unidades + ' unid.' : '') + (g.participacao ? ' · ' + g.participacao : '')
       };
     });
@@ -292,6 +295,7 @@ const extratoConc = {
       if (!melhor || nota < 0.95) { resultado.semLancamento.push({ linha: l }); return; }
       if (!usados.has(melhor._id)) usados.set(melhor._id, []);
       usados.get(melhor._id).push(l);
+      l._finId = melhor._id;
     });
     usados.forEach((linhas, id) => {
       const f = fins.find(x => x._id === id);
@@ -325,24 +329,210 @@ const extratoConc = {
   _cfg() { try { return orcamento.cfg().valoresPagos || {}; } catch (e) { return {}; } },
   _salvarCfg(v) { try { orcamento.salvarCfg({ valoresPagos: v }); } catch (e) {} },
   _convChave(c) { return extratoConc._norm(c).split(' ')[0] || ''; },
-  aprender(ext) {
+  /* ---- O QUE O VALOR PAGO QUER DIZER --------------------------------
+     O valor TOTAL de um código num atendimento é a prova. Ele pode ser o
+     valor cheio (enfermaria, horário normal, 100%), o dobro (apartamento),
+     2× ou 3× pelo horário da Unimed, ou parte (2º procedimento, via
+     diferente). Com uma referência — o que já foi aprendido ou o valor do
+     Soft para o código — dá para dizer qual explicação bate. Quando não dá
+     certeza, vira DÚVIDA e ele escolhe numa janela. */
+  _referencia(conv, cod, nomeConv) {
+    const cv = extratoConc._convChave(conv);
+    const r = ((extratoConc._cfg()[cv] || {}).codigos || {})[cod];
+    const vs = r ? (r.obs || []).map(o => o.v).filter(v => v > 0) : [];
+    if (vs.length) return { valor: extratoConc._mediana(vs), origem: 'aprendido (' + vs.length + ' obs.)' };
+    try {
+      const b = precos.base(cod, cod === '10101012' ? 'medico' : 'anestesia', nomeConv || conv);
+      if (b && b.valor > 0) return { valor: Number(b.valor), origem: 'tabela do Soft' };
+    } catch (e) {}
+    return null;
+  },
+  opcoes(l, ref) {
+    const T = Number(l.pago) || 0;
+    const ehUni = /unimed/i.test(l.convenio || '');
+    let calc = null;
+    try { if (ehUni) calc = fin.majoracao.calcular(l.data, l.hora); } catch (e) {}
+    const acoms = [[1, 'enfermaria'], [2, 'apartamento']];
+    const hors = ehUni
+      ? [[1, 'horário 1×'], [2, 'horário 2×'], [3, 'horário 3×']]
+      : [[1, 'horário normal'], [1.3, 'urgência +30%']];
+    let vias;
+    if (l.fatorVia) vias = [[l.fatorVia, 'via ' + l.via + ' (' + Math.round(l.fatorVia * 100) + '%)']];
+    else if (l.pct && l.pct !== 100) vias = [[l.pct / 100, l.pct + '% pago'], [1, '100% (o % não reduziu o total)']];
+    else vias = [[1, '100%'], [0.5, '2º procedimento 50%'], [0.7, 'via diferente 70%']];
+    const ops = [];
+    acoms.forEach(a => hors.forEach(h => vias.forEach(v => {
+      const f = a[0] * h[0] * v[0];
+      const cheio = Math.round(T / f * 100) / 100;
+      const simples = a[0] === 1 && (calc ? h[0] === calc.fator : h[0] === 1) && v === vias[0];
+      /* quantos "ajustes" a explicação pede — a com menos ajustes é a mais provável */
+      const ajustes = (a[0] > 1 ? 1 : 0) + ((calc ? h[0] !== calc.fator : h[0] !== 1) ? 1 : 0) + (v !== vias[0] ? 1.5 : 0);
+      ops.push({ acom: a[0], hor: h[0], via: v[0], fator: f, cheio, ajustes, horCalc: calc ? h[0] === calc.fator : h[0] === 1,
+        rotulo: [a[1] + (a[0] > 1 ? ' ×' + a[0] : ''), h[1] + (calc && h[0] === calc.fator ? ' — ' + calc.motivo : ''), v[1]].join(' · '),
+        simples, dev: ref && ref.valor ? Math.abs(cheio - ref.valor) / ref.valor : null });
+    })));
+    /* empate (o dobro pode ser apartamento OU horário 2×): vale o horário que
+       a data e a hora do extrato dão */
+    const dv = o => o.dev == null ? 0 : Math.round(o.dev * 1000) / 1000;
+    ops.sort((x, y) => (dv(x) - dv(y)) || (x.ajustes - y.ajustes) || (y.horCalc - x.horCalc) || (x.fator - y.fator));
+    /* referência que não bate com nada (tabela genérica do Soft, por ex.) não
+       pode empurrar um "apartamento" inventado para o topo: vale a mais simples */
+    if (!ops.length || ops[0].dev == null || ops[0].dev > 0.10) ops.sort((x, y) => (x.ajustes - y.ajustes) || (x.fator - y.fator));
+    return { ops: ops.slice(0, 8), calc };
+  },
+  analisar(ext) {
+    const certos = [], duvidas = [];
+    /* referência dentro do próprio extrato: o mesmo código pago mais de uma vez */
+    const doExtrato = {};
+    ext.linhas.forEach(l => {
+      if (!(l.pago > 0) || !l.codigo) return;
+      const k = extratoConc._convChave(l.convenio) + '|' + l.codigo;
+      const b = l.pago / (l.fatorVia || 1);
+      if (!doExtrato[k] || b < doExtrato[k].v) doExtrato[k] = { v: b, n: (doExtrato[k] ? doExtrato[k].n : 0) + 1 };
+      else doExtrato[k].n++;
+    });
+    ext.linhas.forEach(l => {
+      if (!l.codigo || !(l.pago > 0) || (l.glosa || 0) > 0.005) return;
+      /* referência: o aprendido; senão o MESMO código repetido neste extrato
+         (o menor valor = o cheio); só por último a tabela genérica do Soft */
+      let ref = extratoConc._referencia(l.convenio, l.codigo);
+      const k = extratoConc._convChave(l.convenio) + '|' + l.codigo;
+      if ((!ref || /tabela/.test(ref.origem)) && doExtrato[k] && doExtrato[k].n > 1) ref = { valor: Math.round(doExtrato[k].v * 100) / 100, origem: 'menor valor deste código no extrato' };
+      const { ops, calc } = extratoConc.opcoes(l, ref);
+      const melhor = ops[0];
+      const caso = { linha: l, ref, ops, calc, escolha: 0 };
+      if (ref && melhor && melhor.simples && melhor.dev != null && melhor.dev <= 0.02) certos.push(Object.assign(caso, { cheio: melhor.cheio, op: melhor }));
+      else duvidas.push(caso);
+    });
+    return { certos, duvidas };
+  },
+  _aprenderUm(todos, ext, l, cheio, op) {
+    const cv = extratoConc._convChave(l.convenio);
+    if (!cv || !(cheio > 0)) return false;
+    const porConv = todos[cv] = todos[cv] || { nome: l.convenio, codigos: {} };
+    const reg = porConv.codigos[l.codigo] = porConv.codigos[l.codigo] || { descricao: l.descricao, obs: [] };
+    const ref = (ext.fonte || l.fonte) + '|' + (ext.competencia || '') + '|' + l.ref + '|' + l.paciente;
+    if (reg.obs.some(o => o.ref === ref)) return false;
+    reg.obs.push({ v: cheio, pago: l.pago, base: op ? op.rotulo : (l.base || ''), porteAn: l.porteAn || '', comp: ext.competencia || '', data: l.data, ref });
+    reg.obs = reg.obs.slice(-40);
+    if (l.porteAn) reg.porteAn = l.porteAn;
+    return true;
+  },
+  aprender(ext, casos) {
     const todos = JSON.parse(JSON.stringify(extratoConc._cfg()));
     let n = 0;
-    ext.linhas.forEach(l => {
-      if (!l.codigo || !(l.valorCheio > 0) || (l.glosa || 0) > 0.005) return;
-      const cv = extratoConc._convChave(l.convenio);
-      if (!cv) return;
-      const porConv = todos[cv] = todos[cv] || { nome: l.convenio, codigos: {} };
-      const reg = porConv.codigos[l.codigo] = porConv.codigos[l.codigo] || { descricao: l.descricao, obs: [] };
-      const ref = ext.fonte + '|' + ext.competencia + '|' + l.ref + '|' + l.paciente;
-      if (reg.obs.some(o => o.ref === ref)) return;
-      reg.obs.push({ v: l.valorCheio, pago: l.pago, base: l.base, porteAn: l.porteAn || '', comp: ext.competencia, data: l.data, ref });
-      reg.obs = reg.obs.slice(-40);
-      if (l.porteAn) reg.porteAn = l.porteAn;
-      n++;
-    });
+    (casos || extratoConc.analisar(ext).certos).forEach(c => { if (extratoConc._aprenderUm(todos, ext, c.linha, c.cheio, c.op)) n++; });
     extratoConc._salvarCfg(todos);
     return n;
+  },
+  /* dúvidas ficam guardadas até ele decidir */
+  _duvidasGuardadas() { try { return orcamento.cfg().valoresPagosDuvidas || []; } catch (e) { return []; } },
+  _guardarDuvidas(lista) { try { orcamento.salvarCfg({ valoresPagosDuvidas: lista }); } catch (e) {} },
+  abrirDuvidas(ext, duvidas) {
+    if (!duvidas) {
+      const g = extratoConc._duvidasGuardadas();
+      duvidas = g.map(d => { const ref = extratoConc._referencia(d.linha.convenio, d.linha.codigo); const o = extratoConc.opcoes(d.linha, ref);
+        return { linha: d.linha, ref, ops: o.ops, calc: o.calc, ext: d.ext }; });
+    }
+    /* iguais ficam juntas: mesmo código, mesmo valor */
+    duvidas = duvidas.slice().sort((a, b) => String(a.linha.codigo).localeCompare(String(b.linha.codigo)) || (a.linha.pago - b.linha.pago));
+    extratoConc._duv = { ext, duvidas };
+    if (!duvidas.length) { toast('Nenhuma dúvida pendente nos valores pagos 👍'); return; }
+    const E = utils.escapeHTML, F = extratoConc._fmt;
+    const linhas = duvidas.map((d, i) => {
+      const l = d.linha;
+      const det = [l.base, l.hora ? l.data.split('-').reverse().join('/') + ' ' + l.hora : utils.formatarData(l.data),
+        d.calc && d.calc.faixa && d.calc.faixa !== '—' ? 'pelo horário: ' + d.calc.faixa + ' (' + d.calc.motivo + ')' : ''].filter(Boolean).join(' · ');
+      const sel = '<select class="duv-op" data-i="' + i + '" style="max-width:100%">' + d.ops.map((o, j) =>
+        '<option value="' + j + '"' + (j === 0 ? ' selected' : '') + '>R$ ' + F(o.cheio) + ' cheio — ' + E(o.rotulo) +
+        (o.dev != null ? ' (' + (o.dev <= 0.02 ? '✓ bate com a referência' : Math.round(o.dev * 100) + '% da referência') + ')' : '') + '</option>').join('') +
+        '<option value="outro">Outro fator…</option><option value="nao">Não aprender (caso atípico)</option></select>' +
+        '<input type="number" step="0.01" min="0.01" class="duv-fator" data-i="' + i + '" placeholder="fator (ex.: 1,5)" style="display:none;width:120px;margin-top:4px">';
+      const levar = l._finId ? '<label style="font-size:.76rem;display:flex;gap:4px;align-items:center;margin-top:4px"><input type="checkbox" class="duv-levar" data-i="' + i + '" checked> levar apartamento/horário ao lançamento</label>' : '';
+      return '<tr><td><b>' + E(l.paciente) + '</b><br><small>' + E(det) + '</small></td><td>' + E(l.codigo) + '<br><small>' + E((l.descricao || '').slice(0, 42)) + '</small></td>' +
+        '<td><b>R$ ' + F(l.pago) + '</b><br><small>' + (d.ref ? 'ref. R$ ' + F(d.ref.valor) + ' · ' + E(d.ref.origem) : 'sem referência') + '</small></td><td>' + sel + levar + '</td></tr>';
+    }).join('');
+    modal.open('🤔 O que aconteceu nestes pagamentos? (' + duvidas.length + ')',
+      '<label style="display:flex;gap:6px;align-items:center;font-size:.8rem;margin:0 0 6px"><input type="checkbox" id="duv-iguais" checked> mudar uma escolha muda as do <b>mesmo código e mesmo valor pago</b></label>' +
+      '<p style="font-size:.84rem;line-height:1.6;margin:0 0 8px">O valor <b>total</b> pago não bate com uma explicação só. Para cada um, escolha o que aconteceu — já vem marcada a mais provável. ' +
+      'O Soft aprende o <b>valor cheio</b> (enfermaria, horário normal, 100%) a partir da sua escolha.</p>' +
+      '<div style="overflow-x:auto"><table class="fase4-tab" style="width:100%;font-size:.78rem"><thead><tr><th>Paciente</th><th>Código</th><th>Pago (total)</th><th>O que aconteceu</th></tr></thead><tbody>' + linhas + '</tbody></table></div>',
+      '<button class="btn" onclick="extratoConc.deixarDuvidas()">Deixar para depois</button>' +
+      '<button class="btn btn-primary" onclick="extratoConc.confirmarDuvidas()">✅ Confirmar escolhas</button>');
+    const mostrarFator = sel => {
+      const f = document.querySelector('.duv-fator[data-i="' + sel.dataset.i + '"]');
+      if (f) f.style.display = sel.value === 'outro' ? '' : 'none';
+    };
+    document.querySelectorAll('.duv-op').forEach(sel => sel.addEventListener('change', () => {
+      mostrarFator(sel);
+      if (!(document.getElementById('duv-iguais') || {}).checked) return;
+      const a = duvidas[Number(sel.dataset.i)].linha;
+      const escolhida = sel.value === 'outro' || sel.value === 'nao' ? null : (duvidas[Number(sel.dataset.i)].ops[Number(sel.value)] || {}).rotulo;
+      document.querySelectorAll('.duv-op').forEach(o => {
+        if (o === sel) return;
+        const b = duvidas[Number(o.dataset.i)].linha;
+        if (b.codigo !== a.codigo || Math.abs(b.pago - a.pago) > 0.005) return;
+        if (escolhida == null) o.value = sel.value;
+        else { const j = duvidas[Number(o.dataset.i)].ops.findIndex(x => x.rotulo === escolhida); if (j >= 0) o.value = String(j); }
+        mostrarFator(o);
+      });
+    }));
+  },
+  deixarDuvidas() {
+    const st = extratoConc._duv;
+    modal.close();
+    if (!st) return;
+    const ja = extratoConc._duvidasGuardadas();
+    const chave = d => [d.linha.fonte, d.linha.ref, d.linha.paciente, d.linha.codigo].join('|');
+    const set = new Set(ja.map(chave));
+    const novos = st.duvidas.filter(d => !set.has(chave(d))).map(d => ({ linha: d.linha, ext: d.ext || (st.ext ? { fonte: st.ext.fonte, competencia: st.ext.competencia } : {}) }));
+    extratoConc._guardarDuvidas(ja.concat(novos));
+    toast('🤔 ' + st.duvidas.length + ' dúvida(s) guardada(s) — resolva em 📈 Valores pagos', 'info');
+    extratoConc._duv = null;
+  },
+  confirmarDuvidas() {
+    const st = extratoConc._duv;
+    if (!st) { modal.close(); return; }
+    const todos = JSON.parse(JSON.stringify(extratoConc._cfg()));
+    let aprendidos = 0, levados = 0;
+    const resolvidas = new Set();
+    st.duvidas.forEach((d, i) => {
+      const sel = document.querySelector('.duv-op[data-i="' + i + '"]');
+      const v = sel ? sel.value : '0';
+      resolvidas.add(i);
+      if (v === 'nao') return;
+      let op;
+      if (v === 'outro') {
+        const fator = parseFloat(String((document.querySelector('.duv-fator[data-i="' + i + '"]') || {}).value || '').replace(',', '.'));
+        if (!(fator > 0)) return;
+        op = { fator, cheio: Math.round(d.linha.pago / fator * 100) / 100, rotulo: 'fator ' + fator + ' (informado)', acom: 1, hor: 1 };
+      } else op = d.ops[Number(v)];
+      if (!op) return;
+      const ext = d.ext || st.ext || {};
+      if (extratoConc._aprenderUm(todos, ext, d.linha, op.cheio, op)) aprendidos++;
+      /* "levar ao lançamento": apartamento e horário viram dado da cobrança */
+      const levar = document.querySelector('.duv-levar[data-i="' + i + '"]');
+      if (levar && levar.checked && d.linha._finId && (op.acom > 1 || op.hor > 1)) {
+        const f = store.getById('financeiro', d.linha._finId);
+        if (f) {
+          if (op.acom > 1) { f.acomodacao = 'apartamento'; f.fator_acomodacao = op.acom; }
+          if (op.hor > 1) { f.fator_majoracao = op.hor; f.majoracao_faixa = op.hor + '×'; f.majoracao_motivo = 'confirmado na conciliação do extrato'; }
+          const salvo = store.save('financeiro', f);
+          try { store.notificarNuvem(salvo, 'Conciliação: acomodação/horário', { silencioso: true }); } catch (e) {}
+          levados++;
+        }
+      }
+    });
+    extratoConc._salvarCfg(todos);
+    /* as guardadas que foram resolvidas saem da fila */
+    const chave = l => [l.fonte, l.ref, l.paciente, l.codigo].join('|');
+    const feitas = new Set(st.duvidas.filter((d, i) => resolvidas.has(i)).map(d => chave(d.linha)));
+    extratoConc._guardarDuvidas(extratoConc._duvidasGuardadas().filter(g => !feitas.has(chave(g.linha))));
+    const usados = extratoConc.usarNosVazios();
+    modal.close();
+    extratoConc._duv = null;
+    toast('✅ ' + aprendidos + ' valor(es) aprendido(s)' + (levados ? ', ' + levados + ' lançamento(s) com apartamento/horário' : '') + (usados ? ' · ' + usados + ' novo(s) no Gerar financeiro' : ''), 'success');
+    return { aprendidos, levados, usados };
   },
   _mediana(vs) {
     const a = vs.slice().sort((x, y) => x - y);
@@ -510,14 +700,25 @@ const extratoConc = {
       try { store.notificarNuvem(salvo, 'Lançamento do extrato ' + ext.fonte, { silencioso: true }); } catch (e) {}
       criados++;
     });
-    let aprendidos = 0, usados = 0;
-    if (aprender) { aprendidos = extratoConc.aprender(ext); usados = extratoConc.usarNosVazios(); }
+    let aprendidos = 0, usados = 0, duvidas = [];
+    if (aprender) {
+      const an = extratoConc.analisar(ext);
+      aprendidos = extratoConc.aprender(ext, an.certos);
+      usados = extratoConc.usarNosVazios();
+      duvidas = an.duvidas;
+    }
     modal.close();
     try { if (state.currentModule === 'financeiro') financeiro.render(); } catch (e) {}
     toast('✅ Conciliação ' + ext.fonte + ': ' + atualizados + ' recebido(s), ' + criados + ' lançado(s)' +
-      (aprender ? ' · ' + aprendidos + ' valor(es) aprendido(s), ' + usados + ' novo(s) no Gerar financeiro' : ''), 'success');
+      (aprender ? ' · ' + aprendidos + ' valor(es) aprendido(s), ' + usados + ' novo(s) no Gerar financeiro' : '') +
+      (duvidas.length ? ' · ' + duvidas.length + ' dúvida(s) para você confirmar' : ''), 'success');
     extratoConc._ext = null; extratoConc._res = null;
-    return { atualizados, criados, aprendidos, usados };
+    if (duvidas.length) {
+      const meta = { fonte: ext.fonte, competencia: ext.competencia };
+      duvidas.forEach(d => { d.ext = meta; });
+      setTimeout(() => extratoConc.abrirDuvidas(meta, duvidas), 250);
+    }
+    return { atualizados, criados, aprendidos, usados, duvidas: duvidas.length };
   },
 
   /* tabela: código × porte cirúrgico × porte anestésico × valor pago */
@@ -525,8 +726,9 @@ const extratoConc = {
     const E = utils.escapeHTML, F = extratoConc._fmt;
     const t = extratoConc.tabela();
     if (!t.length) {
+      const nd0 = extratoConc._duvidasGuardadas().length;
       modal.open('📈 Valores pagos aprendidos', '<p style="font-size:.86rem">Ainda não há valores aprendidos. Concilie um extrato (📑 Conciliar extrato) para o Soft aprender quanto cada convênio paga por código.</p>',
-        '<button class="btn" onclick="modal.close()">Fechar</button>');
+        '<button class="btn" onclick="modal.close()">Fechar</button>' + (nd0 ? '<button class="btn btn-primary" onclick="extratoConc.abrirDuvidas(null)">🤔 Resolver ' + nd0 + ' dúvida(s)</button>' : ''));
       return;
     }
     /* correlação porte anestésico → valor, por convênio */
@@ -543,7 +745,9 @@ const extratoConc = {
         '</td><td>' + (l.noSoft != null ? 'R$ ' + F(l.noSoft) + '<br><small>' + E(l.origemSoft) + '</small>' : '—') + '</td><td>' +
         (l.noSoft != null && Math.abs(l.noSoft - l.valor) <= 0.05 ? '✓' : '<button class="btn btn-xs" onclick="extratoConc.usarValor(' + utils.jsArg(l.conv) + ',' + utils.jsArg(l.codigo) + ')">Usar</button>') +
         '</td></tr>').join('') + '</tbody></table></div>';
-    modal.open('📈 Valores pagos aprendidos', corpo, '<button class="btn" onclick="modal.close()">Fechar</button>');
+    const nd = extratoConc._duvidasGuardadas().length;
+    modal.open('📈 Valores pagos aprendidos', corpo, '<button class="btn" onclick="modal.close()">Fechar</button>' +
+      (nd ? '<button class="btn btn-primary" onclick="extratoConc.abrirDuvidas(null)">🤔 Resolver ' + nd + ' dúvida(s)</button>' : ''));
   }
 };
 window.extratoConc = extratoConc;

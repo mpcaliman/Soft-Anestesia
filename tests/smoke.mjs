@@ -26058,7 +26058,7 @@ await test('Extrato (PDF): Coopanest e Unimed lidos, conciliados com o Financeir
     ]];
     uni[0].push(R(270, [36, 'O pagamento será realizado no dia 06/11/2026 através do Banco']));
     const u = extratoConc.parseUnimed(uni);
-    out.uniSoma = u.linhas.length === 1 && u.linhas[0].pago === 715.8 && u.linhas[0].data === '2026-07-22' && u.linhas[0].valorCheio === 715.8;
+    out.uniSoma = u.linhas.length === 1 && u.linhas[0].pago === 715.8 && u.linhas[0].data === '2026-07-22' && u.linhas[0].hora === '13:10' && u.linhas[0].valorCheio === null;
     out.uniPagamento = u.dataPagamento === '2026-11-06' && u.competencia === '2026-10';
     out.detecta = extratoConc.detectar([[R(500, [261, 'Movimento Detalhado Por Cooperado Com Procedimentos'])]]) === 'coopanest' &&
       extratoConc.detectar([[R(500, [318, 'Espelho de Pagamento Prestador'])]]) === 'unimed';
@@ -26078,6 +26078,10 @@ await test('Extrato (PDF): Coopanest e Unimed lidos, conciliados com o Financeir
     document.getElementById('extrato-data').value = '2026-11-10';
     document.querySelector('.extrato-lancar[data-i="0"]').checked = true;
     const ap = extratoConc.aplicar();
+    /* sem referência para alguns códigos: a janela de dúvidas abre e ele confirma (padrão = a mais simples) */
+    await new Promise(res => setTimeout(res, 400));
+    out.duvidasAbriu = ap.duvidas === 0 || /O que aconteceu/.test(document.getElementById('modal-title').textContent);
+    if (ap.duvidas) extratoConc.confirmarDuvidas();
     const f1 = store.getById('financeiro', 'f1');
     out.recebido = f1.status === 'recebido' && f1.valor_recebido === 1065.2 && f1.data_pagamento === '2026-11-10' && (f1._conciliacoes || []).length === 1;
     out.lancou = ap.criados === 1 && store.list('financeiro').some(x => x._origemTipo === 'extrato' && x.status === 'recebido');
@@ -26087,7 +26091,7 @@ await test('Extrato (PDF): Coopanest e Unimed lidos, conciliados com o Financeir
     /* valores aprendidos → Gerar financeiro */
     const tab = extratoConc.tabela();
     const colono = tab.find(x => x.codigo === '40201082');
-    out.aprendeu = !!colono && colono.valor === 490.46 && colono.porteAn === '02' && ap.aprendidos >= 3;
+    out.aprendeu = !!colono && colono.valor === 490.46 && colono.porteAn === '02';
     out.usouNoSoft = precos.base('40201082', 'anestesia', 'Bradesco Saúde').valor === 490.46 && precos.base('40201082', 'anestesia', 'Bradesco Saúde').origem === 'codigo_convenio';
     /* valor que ele digitou para o convênio não é sobrescrito */
     precos.definirPorCodigoDoConvenio('bradesco', '40202615', 800);
@@ -26096,6 +26100,40 @@ await test('Extrato (PDF): Coopanest e Unimed lidos, conciliados com o Financeir
     extratoConc.abrirValores();
     out.telaValores = /Valores pagos aprendidos/.test(document.getElementById('modal-title').textContent) && /40201082/.test(document.getElementById('modal-body').textContent);
     modal.close();
+    /* Unimed: total DOBRADO com referência conhecida → dúvida com "apartamento ×2" no topo; confirmar leva ao lançamento */
+    precos.definirPorCodigoDoConvenio('unimed', '31206247', 715.8);
+    store.setList('financeiro', [{ _id: 'fu', paciente: 'Cicrano da Silva', data_proc: '2026-07-22', convenio: 'Unimed', cbhpm_codigo: '31206247', valor_previsto: 715.8, status: 'pendente' }]);
+    const u2 = JSON.parse(JSON.stringify(u)); u2.linhas[0].pago = 1431.6; u2.linhas[0].hora = '10:00';
+    extratoConc.conciliar(u2);
+    const an = extratoConc.analisar(u2);
+    out.duvidaApto = an.duvidas.length === 1 && an.duvidas[0].ops[0].acom === 2 && an.duvidas[0].ops[0].cheio === 715.8;
+    extratoConc.abrirDuvidas({ fonte: 'Unimed', competencia: '2026-10' }, an.duvidas);
+    out.popup = document.querySelectorAll('.duv-op').length === 1 && /apartamento ×2/.test(document.querySelector('.duv-op').selectedOptions[0].textContent);
+    const cd = extratoConc.confirmarDuvidas();
+    const fu = store.getById('financeiro', 'fu');
+    out.levouApto = cd.aprendidos === 1 && cd.levados === 1 && fu.acomodacao === 'apartamento' && fu.fator_acomodacao === 2;
+    /* mesmo total, horário normal, valor igual à referência: aprende sozinho */
+    const u3 = JSON.parse(JSON.stringify(u)); u3.competencia = '2026-11';
+    out.certo = extratoConc.analisar(u3).certos.length === 1;
+    /* duas dúvidas iguais: mudar uma muda a outra */
+    const u5 = JSON.parse(JSON.stringify(u2)); u5.competencia = '2027-01';
+    u5.linhas.push(Object.assign({}, u5.linhas[0], { ref: 'Solicitação 777', paciente: 'OUTRO PACIENTE' }));
+    extratoConc.abrirDuvidas({ fonte: 'Unimed', competencia: '2027-01' }, extratoConc.analisar(u5).duvidas);
+    const sels = document.querySelectorAll('.duv-op');
+    sels[0].value = 'nao'; sels[0].dispatchEvent(new Event('change'));
+    out.propaga = sels.length === 2 && sels[1].value === 'nao';
+    modal.close(); extratoConc._duv = null;
+    /* deixar para depois guarda e reabre pela tela de valores */
+    const u4 = JSON.parse(JSON.stringify(u2)); u4.competencia = '2026-12'; u4.linhas[0].ref = 'Solicitação 999';
+    extratoConc.abrirDuvidas({ fonte: 'Unimed', competencia: '2026-12' }, extratoConc.analisar(u4).duvidas);
+    extratoConc.deixarDuvidas();
+    out.guardou = extratoConc._duvidasGuardadas().length === 1;
+    extratoConc.abrirDuvidas(null);
+    out.reabriu = document.querySelectorAll('.duv-op').length === 1;
+    document.querySelector('.duv-op').value = 'nao';
+    extratoConc.confirmarDuvidas();
+    out.esvaziou = extratoConc._duvidasGuardadas().length === 0;
+    orcamento.salvarCfg({ valoresPagosDuvidas: [] });
     orcamento.salvarCfg({ valoresPagos: {}, precoPorCodigoConvenio: {} });
     store.setList('financeiro', []);
     return out;
@@ -26104,7 +26142,9 @@ await test('Extrato (PDF): Coopanest e Unimed lidos, conciliados com o Financeir
   assert(r.uniSoma && r.uniPagamento && r.detecta, 'Unimed lida (partido somado, débito estornado, data do pagamento): ' + JSON.stringify(r));
   assert(r.casou && r.semLanc && r.naoVeio, 'conciliação por paciente + data + código: ' + JSON.stringify(r));
   assert(r.recebido && r.lancou && r.idempotente, 'aplicar dá baixa, lança o que faltava e não soma duas vezes: ' + JSON.stringify(r));
-  assert(r.aprendeu && r.usouNoSoft && r.respeitaManual && r.telaValores, 'valores aprendidos viram valor do convênio no Gerar financeiro: ' + JSON.stringify(r));
+  assert(r.aprendeu && r.usouNoSoft && r.respeitaManual && r.telaValores && r.duvidasAbriu, 'valores aprendidos viram valor do convênio no Gerar financeiro: ' + JSON.stringify(r));
+  assert(r.duvidaApto && r.popup && r.levouApto && r.certo, 'total dobrado vira dúvida com apartamento ×2 no topo e ele confirma: ' + JSON.stringify(r));
+  assert(r.guardou && r.reabriu && r.esvaziou && r.propaga, 'dúvidas podem ficar para depois e ser resolvidas em Valores pagos: ' + JSON.stringify(r));
   await page.close();
 });
 
