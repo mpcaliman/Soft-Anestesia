@@ -261,7 +261,20 @@ const meuDia = {
     const ok = !!c.consulta._finalizado;
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'consulta\',' + utils.jsArg(c.consulta._id) + ')" title="' + (ok ? 'Consulta finalizada — abrir' : 'Consulta em rascunho — continuar') + '">🩺 ' + (ok ? 'Consulta ✓' : 'Consulta…') + '</button>';
   },
+  /* Atendimento registrado SÓ no financeiro (prontuário no sistema da
+     clínica): não há ficha nem SRPA a cobrar aqui — mostra o local. */
+  _soFinanceiro(c) {
+    if (!c || c.ficha || c.srpa || c.pre || c.consulta || c.agenda || !c.fin) return false;
+    try { return dashboard.soNoFinanceiro([c.fin]).length === 1; } catch (e) { return !c.fin._origemId; }
+  },
+  _chipLocal(c) {
+    if (!meuDia._soFinanceiro(c)) return '';
+    const local = c.fin.hospital || c.fin.local || '';
+    return '<span class="md-chip md-ok" title="Atendimento registrado só no financeiro — o prontuário está no sistema do local">📍 ' +
+      utils.escapeHTML(local || 'só no financeiro') + '</span>';
+  },
   _chipFicha(c) {
+    if (meuDia._soFinanceiro(c)) return '';
     /* nada de cobrar ficha de anestesia de quem veio para uma consulta */
     if (meuDia._ehSoConsulta(c)) return '';
     if (c.ficha) {
@@ -272,6 +285,7 @@ const meuDia = {
     return '<span class="md-chip md-nada">— ficha</span>';
   },
   _chipSrpa(c) {
+    if (meuDia._soFinanceiro(c)) return '';
     if (meuDia._ehSoConsulta(c)) return '';
     if (!c.srpa) return '<span class="md-chip md-nada">— SRPA</span>';
     const ok = !!c.srpa._finalizado;
@@ -399,7 +413,7 @@ const meuDia = {
           <span class="md-proc">${utils.escapeHTML(c.procedimento || '')}</span>
           ${meuDia._linhaCodigos(c)}
         </div>
-        <div class="md-chips">${meuDia._chipPre(c)}${meuDia._chipConsulta(c)}${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
+        <div class="md-chips">${meuDia._chipPre(c)}${meuDia._chipConsulta(c)}${meuDia._chipLocal(c)}${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
       </div>`).join('');
     if (res) {
       const clinicos = casos.filter(c => meuDia._ehClinico(c));
@@ -407,7 +421,7 @@ const meuDia = {
          ser lido. Ele acusava as consultas de não terem ficha de anestesia —
          quatro falsos por dia em quem atende no consultório. Consulta sai da
          conta: o que falta a ela é ser finalizada, e isso tem chip próprio. */
-      const cirurgicos = casos.filter(c => !meuDia._ehClinico(c));
+      const cirurgicos = casos.filter(c => !meuDia._ehClinico(c) && !meuDia._soFinanceiro(c));
       const fichasOk = casos.filter(c => c.ficha && c.ficha._finalizado).length;
       const fichasRasc = casos.filter(c => c.ficha && !c.ficha._finalizado).length;
       const semFicha = cirurgicos.filter(c => !c.ficha).length;

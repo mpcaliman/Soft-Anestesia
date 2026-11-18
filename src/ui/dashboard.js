@@ -289,6 +289,15 @@ const dashboard = {
     const allCons = dashboard._soProducao(filtPorMeta(store.list('consulta')));
     const allRecup = dashboard._soProducao(filtPorMeta(store.list('recuperacao')));
     const allFin = filtPorMeta(store.list('financeiro'));   /* financeiro não tem "finalizar" */
+    /* ATENDIMENTO SÓ NO FINANCEIRO. O prontuário de alguns pacientes é feito no
+       sistema da própria clínica e a secretária lança só a cobrança. Sem ficha
+       aqui, o atendimento não entrava na produção. Contam os lançamentos SEM
+       documento de origem (avulso, extrato, formulário); os históricos
+       importados ficam de fora, e o que nasceu de ficha já conta pela ficha. */
+    const soFin = dashboard.soNoFinanceiro(allFin);
+    const soFinCons = soFin.filter(x => dashboard._ehConsultaFin(x));
+    const soFinProc = soFin.filter(x => !dashboard._ehConsultaFin(x));
+    const nota = n => n ? ' · ' + n + ' só no financeiro' : '';
 
     /* O "Atualizar" do painel também vai buscar os pré-lançamentos na clínica:
        clicar em atualizar e a fila continuar vazia era o pior dos mundos. */
@@ -313,8 +322,8 @@ const dashboard = {
     kpiGrid.innerHTML = `
       <div class="kpi-card" data-detail="anestesia">
         <div class="kpi-label">Anestesias</div>
-        <div class="kpi-value">${allAnest.length + maisNuvem('anestesia')}</div>
-        <div class="kpi-sub">fichas finalizadas${maisNuvem('anestesia') ? ' · ' + maisNuvem('anestesia') + ' na nuvem' : ''}</div>
+        <div class="kpi-value">${allAnest.length + maisNuvem('anestesia') + soFinProc.length}</div>
+        <div class="kpi-sub">fichas finalizadas${maisNuvem('anestesia') ? ' · ' + maisNuvem('anestesia') + ' na nuvem' : ''}${nota(soFinProc.length)}</div>
       </div>
       <div class="kpi-card accent" data-detail="pre">
         <div class="kpi-label">Pré-anestésica</div>
@@ -323,8 +332,8 @@ const dashboard = {
       </div>
       <div class="kpi-card" data-detail="consulta">
         <div class="kpi-label">Consultas / Dor</div>
-        <div class="kpi-value">${allCons.length + maisNuvem('consulta')}</div>
-        <div class="kpi-sub">atendimentos finalizados${maisNuvem('consulta') ? ' · ' + maisNuvem('consulta') + ' na nuvem' : ''}</div>
+        <div class="kpi-value">${allCons.length + maisNuvem('consulta') + soFinCons.length}</div>
+        <div class="kpi-sub">atendimentos finalizados${maisNuvem('consulta') ? ' · ' + maisNuvem('consulta') + ' na nuvem' : ''}${nota(soFinCons.length)}</div>
       </div>
       <div class="kpi-card accent" data-detail="recuperacao">
         <div class="kpi-label">Recuperação pós</div>
@@ -333,7 +342,7 @@ const dashboard = {
       </div>
       <div class="kpi-card warn" data-detail="pacientes_unicos">
         <div class="kpi-label">Pacientes únicos</div>
-        <div class="kpi-value">${dashboard.contarPacientesUnicos(allAnest, allPre, allCons, allRecup)}</div>
+        <div class="kpi-value">${dashboard.contarPacientesUnicos(allAnest, allPre, allCons, allRecup, soFin)}</div>
         <div class="kpi-sub">no período</div>
       </div>
       <div class="kpi-card warn" data-detail="fin_pendentes">
@@ -360,9 +369,9 @@ const dashboard = {
 
     /* Total de atendimentos (donut por módulo) */
     dashboard.renderDonut('dash-total-atend', {
-      'Anestesia': allAnest.length,
+      'Anestesia': allAnest.length + soFinProc.length,
       'Pré-anestésica': allPre.length,
-      'Consulta/Dor': allCons.length,
+      'Consulta/Dor': allCons.length + soFinCons.length,
       'Recuperação': allRecup.length
     }, { centerLabel: 'atend.', categoria: 'dash-total-atend' });
 
@@ -370,6 +379,10 @@ const dashboard = {
     const pagadora = {};
     allAnest.forEach(a => {
       const cat = dashboard._catPagadora(a.paciente && a.paciente.convenio);
+      pagadora[cat] = (pagadora[cat] || 0) + 1;
+    });
+    soFinProc.forEach(f => {
+      const cat = dashboard._catPagadora(f.convenio || f.tipo_pagamento);
       pagadora[cat] = (pagadora[cat] || 0) + 1;
     });
     dashboard.renderDonut('dash-pagadora', pagadora, { centerLabel: 'pacientes', categoria: 'dash-pagadora' });
@@ -1090,6 +1103,15 @@ const dashboard = {
     if (forte) return 'forte:' + forte;
     if (ref) return 'ref:' + ref;
     return it._id ? 'registro:' + it._id : '';
+  },
+  /* Lançamentos que são o ÚNICO registro do atendimento no Soft */
+  _ORIGEM_IMPORTADA: ['importacao', 'acervo'],
+  soNoFinanceiro(lista) {
+    return (lista || []).filter(f => f && !f._origemId && f.status !== 'cancelado' &&
+      dashboard._ORIGEM_IMPORTADA.indexOf(f._origemTipo || '') < 0 && !f._acervo);
+  },
+  _ehConsultaFin(f) {
+    return /^consulta/.test(String((f && f.tipo_atendimento) || '')) || String((f && f.cbhpm_codigo) || '').replace(/\D/g, '') === '10101012';
   },
   contarPacientesUnicos(...lists) {
     const set = new Set();

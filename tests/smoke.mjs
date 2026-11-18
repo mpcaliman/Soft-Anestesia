@@ -325,7 +325,8 @@ await test('Financeiro: fechamento de caixa soma recebido/previsto e salva snaps
   });
   assert(r.somaRec === 1100, 'recebido do dia deveria ser 1100, veio ' + r.somaRec);
   assert(r.somaPrev === 1800, 'previsto deveria ser 1800, veio ' + r.somaPrev);
-  assert(r.aReceber === 900, 'a receber deveria ser 900, veio ' + r.aReceber);
+  /* C foi pago (valor_pago 300): não é mais "a receber" — 100 (A) + 500 (B) */
+  assert(r.aReceber === 600, 'a receber deveria ser 600 (o particular pago não é dívida), veio ' + r.aReceber);
   assert(r.modal, 'modal de caixa deveria abrir');
   assert(r.nFech === 1 && r.fechRec === 1100, 'snapshot deveria salvar com recebido 1100');
   await page.close();
@@ -26145,6 +26146,88 @@ await test('Extrato (PDF): Coopanest e Unimed lidos, conciliados com o Financeir
   assert(r.aprendeu && r.usouNoSoft && r.respeitaManual && r.telaValores && r.duvidasAbriu, 'valores aprendidos viram valor do convênio no Gerar financeiro: ' + JSON.stringify(r));
   assert(r.duvidaApto && r.popup && r.levouApto && r.certo, 'total dobrado vira dúvida com apartamento ×2 no topo e ele confirma: ' + JSON.stringify(r));
   assert(r.guardou && r.reabriu && r.esvaziou && r.propaga, 'dúvidas podem ficar para depois e ser resolvidas em Valores pagos: ' + JSON.stringify(r));
+  await page.close();
+});
+
+await test('Atendimento só no financeiro (prontuário da clínica) entra na produção do Dashboard e no Meu dia sem cobrar ficha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'agenda'].forEach(m => store.setList(m, []));
+    __smokeBindOrg('org-dashboard', 'm1');
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Com Ficha Teste', convenio: 'Unimed' }, procedimento: { data: hoje, descricao: 'Colecistectomia' }, data_anestesia: hoje, _finalizado: true, _updatedAt: new Date().toISOString() }]);
+    store.setList('financeiro', [
+      { _id: 'fa', paciente: 'Com Ficha Teste', data_proc: hoje, _origemId: 'a1', _origemTipo: 'anestesia', tipo_atendimento: 'procedimento', valor_previsto: 500 },
+      { _id: 'fs1', paciente: 'So Financeiro Um', data_proc: hoje, _origemTipo: 'avulso', tipo_atendimento: 'procedimento', hospital: 'Med Center', convenio: 'Bradesco Saúde', valor_previsto: 700 },
+      { _id: 'fs2', paciente: 'So Financeiro Dois', data_proc: hoje, _origemTipo: 'extrato', tipo_atendimento: 'consulta_geral', cbhpm_codigo: '10101012', hospital: 'Hospital X', valor_previsto: 122 },
+      { _id: 'fi', paciente: 'Importado Antigo', data_proc: hoje, _origemTipo: 'importacao', tipo_atendimento: 'procedimento', valor_previsto: 300 }
+    ]);
+    document.getElementById('dash-escopo').value = 'clinica';
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    const kpi = document.getElementById('kpi-grid');
+    const val = d => (kpi.querySelector('[data-detail="' + d + '"] .kpi-value') || {}).textContent.trim();
+    out.anest = val('anestesia') === '2' && /1 só no financeiro/.test(kpi.querySelector('[data-detail="anestesia"] .kpi-sub').textContent);
+    out.consulta = val('consulta') === '1';
+    out.unicos = val('pacientes_unicos') === '3';
+    /* Meu dia: local no lugar de "— ficha / — SRPA", e fora do "Sem ficha" */
+    const casos = meuDia.coletar();
+    const so = casos.find(c => /So Financeiro Um/.test(c.nome));
+    out.chipLocal = !!so && /Med Center/.test(meuDia._chipLocal(so)) && meuDia._chipFicha(so) === '' && meuDia._chipSrpa(so) === '';
+    store.setList('financeiro', store.list('financeiro').filter(x => x._id !== 'fi'));
+    meuDia.render();
+    const resumo = (document.getElementById('meu-dia-resumo') || document.body).textContent;
+    out.semFichaZero = !/Sem ficha\s*[1-9]/.test(resumo);
+    ['anestesia', 'financeiro'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.anest && r.consulta && r.unicos, 'produção conta o que está só no financeiro (sem duplicar o que tem ficha e sem os importados): ' + JSON.stringify(r));
+  assert(r.chipLocal && r.semFichaZero, 'Meu dia mostra o local e não cobra ficha: ' + JSON.stringify(r));
+  await page.close();
+});
+
+await test('Financeiro: editar não encolhe a lista, código principal aparece na edição e os relatórios somam pela mesma regra', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const hoje = new Date().toISOString().slice(0, 10);
+    const lista = [];
+    for (let i = 0; i < 450; i++) lista.push({ _id: 'x' + i, paciente: 'Paciente ' + i, data_proc: hoje, valor_previsto: 100, status: 'pendente' });
+    lista.push({ _id: 'cod1', paciente: 'Com Codigo So Principal', data_proc: hoje, cbhpm_codigo: '40201082', procedimento: 'Colonoscopia', valor_previsto: 490.45, status: 'pendente' });
+    lista.push({ _id: 'canc', paciente: 'Cancelado', data_proc: hoje, valor_previsto: 999, status: 'cancelado' });
+    lista.push({ _id: 'pago', paciente: 'Pago Pelo Faturamento', data_proc: hoje, valor_previsto: 300, valor_pago: 300, status: 'recebido', forma_pagamento: 'PIX', data_pagamento: hoje });
+    store.setList('financeiro', lista);
+    location.hash = '#financeiro'; await new Promise(res => setTimeout(res, 400));
+    const linhas = () => document.querySelectorAll('#financeiro-tbody tr.fin-linha').length;
+    out.limite = linhas() === 400 && /Mostrar mais/.test(document.getElementById('financeiro-tbody').textContent);
+    financeiro.mostrarMais(true);
+    out.todos = linhas() === 453;
+    /* editar um registro e salvar: a lista continua inteira */
+    financeiro.editar('cod1');
+    const corpo = document.getElementById('fin-codigos-body');
+    out.codigoNaEdicao = corpo.querySelectorAll('tr').length === 1 && corpo.querySelector('[name="fin_cod_codigo[]"]').value.replace(/\D/g, '') === '40201082';
+    financeiro.salvar();
+    out.listaInteira = !financeiro._contexto && linhas() === 453;
+    /* regra única de valores */
+    const v = financeiro.valores;
+    out.cancelado = v({ valor_previsto: 999, status: 'cancelado' }).prev === 0 && v({ valor_previsto: 999, status: 'cancelado' }).aReceber === 0;
+    out.pagoPorValorPago = v({ valor_previsto: 300, valor_pago: 300, status: 'recebido' }).rec === 300 && v({ valor_previsto: 300, valor_pago: 300, status: 'recebido' }).aReceber === 0;
+    out.cortesia = v({ valor_previsto: 200, status: 'cortesia' }).aReceber === 0;
+    out.periodoSemCancelado = !financeiro.lancamentosDoPeriodo(hoje, hoje, 'proc').some(x => x._id === 'canc');
+    const cx = financeiro.caixa._resumo(hoje);
+    out.caixaForma = cx.porForma.PIX === 300 && !cx.realizados.some(x => x._id === 'canc');
+    /* conciliação por código: linha principal com o código, sem cancelado */
+    let html = '';
+    const mo = modal.open; modal.open = (t, b) => { html = String(b); };
+    try { financeiro.relatorioConciliacao('porCodigo'); } finally { modal.open = mo; }
+    out.porCodigo = html.replace(/[.\-]/g, '').indexOf('40201082') >= 0 && !/Cancelado/.test(html);
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.limite && r.todos, 'a lista não corta calada — "Mostrar mais/todos": ' + JSON.stringify(r));
+  assert(r.codigoNaEdicao && r.listaInteira, 'editar abre com o código principal e salvar não encolhe a lista: ' + JSON.stringify(r));
+  assert(r.cancelado && r.pagoPorValorPago && r.cortesia && r.periodoSemCancelado && r.caixaForma && r.porCodigo, 'relatórios pela mesma regra de valores: ' + JSON.stringify(r));
   await page.close();
 });
 

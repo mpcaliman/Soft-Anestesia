@@ -1298,6 +1298,7 @@ textarea.campo-desc { min-height: 0; overflow-y: hidden; line-height: 1.45; }
 tr.fin-linha { cursor: pointer; }
 tr.fin-linha:hover > td { background: var(--primary-soft, #e8eef5); }
 tr.fin-linha .actions-cell { cursor: default; }
+tr.fin-linha.fin-editado > td { background: #fff4b8; transition: background 1.5s; }
 
 /* Janela de finalização: a escolha de gerar ou não vem antes de tudo */
 .fin-gerar-toggle {
@@ -4921,7 +4922,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-18b</b><br>
+    v7.1 · build <b id="build-tag">2026-11-18c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -16639,7 +16640,7 @@ const ui = {
       try {
         try { edicaoViva.ligar(); if (edicaoViva.MODS.indexOf(modName) >= 0) edicaoViva.restaurar(modName); } catch (e) {}
         if (modName === 'dashboard') { try { ambiente.faixaLegado(); } catch (e) {} dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { pendProntuario.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
-        else if (modName === 'financeiro') financeiro.render();
+        else if (modName === 'financeiro') { financeiro._contexto = null; financeiro._limite = 400; financeiro.render(); }   /* entrar na aba = lista inteira */
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { clinicaIdentidade.renderAjustes(); } catch (e) {} try { ambiente.aplicarPermissoesAjustes(); } catch (e) {} try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
@@ -49158,7 +49159,46 @@ const financeiro = {
     aviso('☁️ ' + regs.length + ' lançamento(s) do período trazidos da nuvem');
     return m.novos + m.atualizados;
   },
+  /* RELATÓRIO DE PERÍODO ANTIGO: o aparelho guarda só parte do histórico
+     (os finalizados antigos ficam na nuvem). A lista já buscava ao mudar o
+     filtro de data; os relatórios liam só o aparelho e saíam incompletos sem
+     avisar. Agora pedem o período à nuvem e se refazem quando ele chega. */
+  _periodoNoAparelho(dataISO) {
+    for (const k of financeiro._periodosTrazidos) {
+      const [de, ate] = k.split('|');
+      if (dataISO >= de && (!ate || dataISO <= ate)) return true;
+    }
+    return false;
+  },
+  _garantirNuvem(de, ate, refazer) {
+    const corte = (cloudRel.JANELA || {}).financeiro;
+    if (!de || !corte || de >= corte) return;
+    try {
+      financeiro.buscarNaNuvem(de, ate).then(n => { if (n > 0 && typeof refazer === 'function') { try { refazer(); } catch (e) {} } });
+    } catch (e) {}
+  },
   STATUS_QUITADO: ['recebido', 'finalizado', 'cortesia'],
+  /* ---- UMA REGRA SÓ PARA OS VALORES DE UM LANÇAMENTO ------------------
+     Cada relatório somava de um jeito: um lia só o valor_recebido (e o
+     "pago" marcado no faturamento, que grava valor_pago, ficava R$ 0), outro
+     contava os cancelados como produção, outro tratava cortesia como dívida.
+     O mesmo mês dava "A receber" diferente em cada tela. Agora todos leem
+     daqui. */
+  valores(x) {
+    const n = v => { const k = parseFloat(v); return Number.isFinite(k) ? k : 0; };
+    const cancelado = !!x && x.status === 'cancelado';
+    const cortesia = !!x && x.status === 'cortesia';
+    const quitado = !!x && financeiro.ehQuitado(x.status);
+    const prev = cancelado ? 0 : n(x && x.valor_previsto);
+    let rec = n(x && x.valor_recebido);
+    if (!(rec > 0)) rec = n(x && x.valor_pago);
+    if (cancelado) rec = 0;
+    const glo = cancelado ? 0 : n(x && x.glosa);
+    const aReceber = (cancelado || cortesia || quitado) ? 0 : Math.max(0, prev - rec - glo);
+    return { prev, rec, glo, aReceber, cancelado, cortesia, quitado };
+  },
+  /* cancelado não é produção nem dinheiro a receber */
+  ativos(lista) { return (lista || []).filter(x => x && x.status !== 'cancelado'); },
   ehQuitado(status) {
     return financeiro.STATUS_QUITADO.indexOf(String(status || '').toLowerCase()) >= 0;
   },
@@ -49832,8 +49872,18 @@ const financeiro = {
         try { prontuario.restaurar('fintroca', item._docs_troca); } catch (e) {}
         document.querySelector(`#${financeiro.formId} [name="id"]`).value = item._id;
         document.getElementById('financeiro-form-titulo').textContent = 'Editar registro';
-        /* Restaura códigos TUSS */
-        if (Array.isArray(item.codigos)) financeiro.codigos.restaurar(item.codigos);
+        /* Restaura códigos TUSS. Lançamento sem a tabela (antigo, importado,
+           automático) abria com a lista de procedimentos VAZIA, embora tivesse
+           o código principal: a linha principal entra na tabela. */
+        if (Array.isArray(item.codigos) && item.codigos.length) financeiro.codigos.restaurar(item.codigos);
+        else if (item.cbhpm_codigo || item.procedimento) {
+          financeiro.codigos.restaurar([{
+            codigo: item.cbhpm_codigo || '', descricao: item.cbhpm_descricao || item.procedimento || '',
+            qtd: item.quantidade || 1, grau: String(item.fracao != null ? item.fracao : 100), lateralidade: item.lateralidade || '',
+            valor_unit: item.valor_base != null ? item.valor_base : (item.valor_previsto || ''),
+            valor_previsto: item.valor_previsto || '', valor_recebido: item.valor_recebido || '', glosa: item.glosa || ''
+          }]);
+        }
         try { financeiro._pintarPago(document.getElementById(financeiro.formId), item.status); } catch (e) {}
         /* lançamentos antigos guardavam só a hora da faixa (hora_proc) */
         if (!item.hora_inicio && item.hora_proc) {
@@ -49979,10 +50029,17 @@ const financeiro = {
         ].forEach(k => { if (data[k] === undefined && previo[k] !== undefined) data[k] = previo[k]; });
       }
     }
+    const eraEdicao = !!(data._id && store.getById('financeiro', data._id));
     const saved = store.save('financeiro', data);
     store.notificarNuvem(saved, 'Registro financeiro');
-    /* mesma regra do lançamento rápido: a lista mostra o que esta ação tocou */
-    try { financeiro.marcarContexto('form', 'criados ou editados agora', saved && saved._id); } catch (e) {}
+    /* CORRIGIR UM LANÇAMENTO NÃO ENCOLHE A LISTA.
+       Depois de salvar, a lista passava a mostrar só os registros editados
+       ("contexto") — e ficava assim até alguém achar o "Ver todos": quem
+       estava corrigindo vários lançamentos da secretária via a lista
+       "sempre parcial". Edição volta à lista inteira, com a linha editada
+       destacada; só o lançamento NOVO abre o contexto do que foi criado. */
+    if (eraEdicao) financeiro._destacar = saved && saved._id;
+    else { try { financeiro.marcarContexto('form', 'criados agora', saved && saved._id); } catch (e) {} }
     financeiro.cancelar();
     financeiro.render();
   },
@@ -50263,6 +50320,14 @@ const financeiro = {
             <strong>🩺 Produção do mês</strong><br>
             <small style="color:var(--text-soft)">Quanto foi produzido num mês — da clínica inteira ou de um médico específico</small>
           </button>
+          <button class="btn" onclick="modal.close(); financeiro.relatorioAuditoria()" style="text-align:left;padding:14px">
+            <strong>🔎 Auditoria do período</strong><br>
+            <small style="color:var(--text-soft)">Tudo o que foi lançado (ou realizado) entre duas datas — em PDF ou planilha</small>
+          </button>
+          <button class="btn" onclick="modal.close(); financeiro.rel.abrir()" style="text-align:left;padding:14px">
+            <strong>🧩 Relatório personalizado</strong><br>
+            <small style="color:var(--text-soft)">Escolha período, colunas, filtros e agrupamento por plano</small>
+          </button>
         </div>
       </div>
     `;
@@ -50325,6 +50390,11 @@ const financeiro = {
         let cab = {};
         try { cab = fin._cabecalho(mod, doc) || {}; } catch (e) { cab = {}; }
         if (!cab.paciente) return;
+        /* atendimento ANTIGO: o lançamento dele pode estar só na nuvem (o
+           aparelho guarda parte do histórico) — oferecer "gerar" criaria uma
+           segunda cobrança. Fica de fora até o período ser trazido. */
+        const corte = (cloudRel.JANELA || {}).financeiro;
+        if (corte && cab.dataProc && cab.dataProc < corte && !financeiro._periodoNoAparelho(cab.dataProc)) return;
         out.push({
           mod, rotulo, id: doc._id,
           paciente: cab.paciente,
@@ -50497,7 +50567,8 @@ const financeiro = {
   },
   _producaoCalcular() {
     const host = document.getElementById('prod-saida'); if (!host) return;
-    const { lista, quem } = financeiro._producaoLista();
+    const { lista, quem, de: pDe, ate: pAte } = financeiro._producaoLista();
+    financeiro._garantirNuvem(pDe, pAte, () => financeiro._producaoCalcular());
     if (!lista.length) {
       const total = (store.list('financeiro') || []).length;
       const meses = financeiro._mesesComLancamento();
@@ -50525,11 +50596,12 @@ const financeiro = {
     }
     const n = v => parseFloat(v) || 0;
     const fmt = v => 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    let prev = 0, rec = 0, glo = 0;
+    let prev = 0, rec = 0, glo = 0, aRec = 0;
     const porConv = new Map();
     lista.forEach(x => {
-      const p = n(x.valor_previsto), r = n(x.valor_recebido), g = n(x.glosa);
-      prev += p; rec += r; glo += g;
+      const vv = financeiro.valores(x);
+      const p = vv.prev, r = vv.rec, g = vv.glo;
+      prev += p; rec += r; glo += g; aRec += vv.aReceber;
       const c = String(x.convenio || x.plano || 'Sem convênio').trim() || 'Sem convênio';
       const atual = porConv.get(c) || { n: 0, prev: 0, rec: 0, glo: 0 };
       atual.n++; atual.prev += p; atual.rec += r; atual.glo += g;
@@ -50543,7 +50615,7 @@ const financeiro = {
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
       cartao('Procedimentos', lista.length) + cartao('Previsto', fmt(prev)) +
       cartao('Recebido', fmt(rec), 'var(--accent)') + cartao('Glosa', fmt(glo), 'var(--danger)') +
-      cartao('A receber', fmt(prev - rec - glo)) + '</div>' +
+      cartao('A receber', fmt(aRec)) + '</div>' +
       '<table class="dash-detail-table" style="margin:0"><thead><tr><th>Convênio</th>' +
       '<th style="text-align:right">Proc.</th><th style="text-align:right">Previsto</th>' +
       '<th style="text-align:right">Recebido</th><th style="text-align:right">Glosa</th></tr></thead><tbody>' +
@@ -50575,21 +50647,36 @@ const financeiro = {
 
   /* Gera relatório expandido — "explode" cada registro em suas linhas de códigos */
   relatorioConciliacao(tipo) {
-    const todos = store.list('financeiro');
+    const todos = financeiro.ativos(store.list('financeiro'));
     const linhas = [];
+    const n = v => { const k = parseFloat(v); return Number.isFinite(k) ? k : 0; };
+    const stReg = reg => financeiro.ehQuitado(reg.status) ? 'pago' :
+      reg.status === 'glosado' ? 'glosado' : reg.status === 'parcial' ? 'parcial' : 'aguardando';
+    const stLinha = st => (st === 'recebido' || st === 'finalizado' || financeiro.ehQuitado(st)) ? 'pago' : (st || 'aguardando');
     todos.forEach(reg => {
-      const codigos = Array.isArray(reg.codigos) && reg.codigos.length > 0
-        ? reg.codigos
-        : [{
-            codigo: '', descricao: reg.procedimento || '', porte: '',
-            valor_previsto: parseFloat(reg.valor_previsto) || 0,
-            valor_recebido: parseFloat(reg.valor_recebido) || 0,
-            glosa: parseFloat(reg.glosa) || 0,
-            status: (reg.status === 'recebido' || reg.status === 'cortesia') ? 'pago' :
-                    reg.status === 'glosado' ? 'glosado' :
-                    reg.status === 'parcial' ? 'parcial' : 'aguardando',
-            observacao: reg.observacoes || ''
-          }];
+      const vr = financeiro.valores(reg);
+      let codigos;
+      if (Array.isArray(reg.codigos) && reg.codigos.length > 0) {
+        /* AS LINHAS DE CÓDIGO NEM SEMPRE SÃO ATUALIZADAS: importação, extrato
+           e a baixa no faturamento gravam só no lançamento, e os fatores
+           (apartamento, horário, urgência) entram só no total. A linha vale
+           para "o quê"; o lançamento vale para "quanto" e "em que pé". */
+        const sp = reg.codigos.reduce((t, c) => t + n(c.valor_previsto), 0);
+        const sr = reg.codigos.reduce((t, c) => t + n(c.valor_recebido), 0);
+        const parte = c => sp > 0 ? n(c.valor_previsto) / sp : 1 / reg.codigos.length;
+        codigos = reg.codigos.map(c => Object.assign({}, c, {
+          valor_previsto: Math.abs(sp - vr.prev) > 0.05 ? Math.round(vr.prev * parte(c) * 100) / 100 : n(c.valor_previsto),
+          valor_recebido: Math.abs(sr - vr.rec) > 0.05 ? Math.round(vr.rec * parte(c) * 100) / 100 : n(c.valor_recebido),
+          status: vr.quitado || reg.status === 'glosado' || reg.status === 'parcial' ? stReg(reg) : stLinha(c.status),
+          observacao: c.observacao || c.obs || ''
+        }));
+      } else {
+        codigos = [{
+          codigo: reg.cbhpm_codigo || '', descricao: reg.cbhpm_descricao || reg.procedimento || '', porte: '',
+          valor_previsto: vr.prev, valor_recebido: vr.rec, glosa: vr.glo,
+          status: stReg(reg), observacao: reg.observacoes || ''
+        }];
+      }
       codigos.forEach(c => {
         linhas.push({
           ...c,
@@ -50878,17 +50965,18 @@ const financeiro = {
     _valorRec(x) { const n = financeiro.caixa._num; return n(x.valor_recebido) || n(x.valor_pago); },
     _resumo(dataISO) {
       const num = financeiro.caixa._num;
-      const lista = store.list('financeiro');
+      const lista = financeiro.ativos(store.list('financeiro'));
       const realizados = lista.filter(x => (x.data_proc || '') === dataISO);
       const recebidos = lista.filter(x => financeiro.caixa._dataRec(x) === dataISO && financeiro.caixa._valorRec(x) > 0);
       const somaPrev = realizados.reduce((s, x) => s + num(x.valor_previsto), 0);
       const somaGlo = realizados.reduce((s, x) => s + num(x.glosa), 0);
       const somaRec = recebidos.reduce((s, x) => s + financeiro.caixa._valorRec(x), 0);
-      const aReceber = realizados.reduce((s, x) => s + (num(x.valor_previsto) - num(x.valor_recebido) - num(x.glosa)), 0);
+      const aReceber = realizados.reduce((s, x) => s + financeiro.valores(x).aReceber, 0);
       const porForma = {}, porConvenio = {};
       recebidos.forEach(x => {
         const vf = financeiro.caixa._valorRec(x);
-        const kf = x.tipo_pagamento || '—'; porForma[kf] = (porForma[kf] || 0) + vf;
+        /* forma = PIX, dinheiro, cartão… (tipo_pagamento é Particular/Convênio) */
+        const kf = x.forma_pagamento || x.tipo_pagamento || '—'; porForma[kf] = (porForma[kf] || 0) + vf;
         const kc = x.convenio || x.tipo_pagamento || '—'; porConvenio[kc] = (porConvenio[kc] || 0) + vf;
       });
       return { dataISO, realizados, recebidos, somaPrev, somaGlo, somaRec, aReceber, porForma, porConvenio };
@@ -51105,7 +51193,14 @@ const financeiro = {
     } else {
       /* com anos de histórico na tela, desenhar tudo trava o celular: mostra os
          400 primeiros (os totais abaixo continuam somando a lista inteira) */
-      const LIMITE_FIN = 400;
+      /* "Mostrar mais" em vez de esconder o resto: a lista não corta calada */
+      const LIMITE_FIN = financeiro._limite || 400;
+      /* o lançamento recém-editado fica sempre à vista */
+      const dest = financeiro._destacar;
+      if (dest) {
+        const i = list.findIndex(x => x._id === dest);
+        if (i >= LIMITE_FIN) { const [it] = list.splice(i, 1); list.unshift(it); }
+      }
       tbody.innerHTML = list.slice(0, LIMITE_FIN).map(x => {
         const prev = parseFloat(x.valor_previsto) || 0;
         const rec  = parseFloat(x.valor_recebido) || 0;
@@ -51122,7 +51217,7 @@ const financeiro = {
           ? `<span class="fin-cod">${utils.escapeHTML(x.cbhpm_codigo)}</span> ` : '';
         const tipo = fin.TIPO_LABEL[x.tipo_atendimento] || '';
         return `
-          <tr class="fin-linha" onclick="financeiro.abrirLinha(event, ${utils.jsArg(x._id)})" title="Toque na linha para abrir e editar este lançamento">
+          <tr class="fin-linha${x._id === dest ? ' fin-editado' : ''}" data-fin-id="${utils.escapeAttr(x._id || '')}" onclick="financeiro.abrirLinha(event, ${utils.jsArg(x._id)})" title="Toque na linha para abrir e editar este lançamento">
             <td data-label="Paciente">${utils.escapeHTML(x.paciente || '')}${auto}${anexoTag}</td>
             <td data-label="Senha">${x.senha ? utils.escapeHTML(x.senha) : '<span style="color:var(--text-mute)">—</span>'}</td>
             <td data-label="Procedimento">${cod}${utils.escapeHTML(x.procedimento || '')}</td>
@@ -51148,15 +51243,27 @@ const financeiro = {
         `;
       }).join('') + (list.length > LIMITE_FIN
         ? '<tr class="empty-row"><td colspan="15">Mostrando ' + LIMITE_FIN + ' de ' + list.length +
-          ' — use os filtros (período, hospital, cirurgião, plano) para ver os demais.</td></tr>' : '');
+          ' (os totais abaixo somam todos). <button type="button" class="btn btn-xs" onclick="financeiro.mostrarMais()">Mostrar mais 400</button> ' +
+          '<button type="button" class="btn btn-xs" onclick="financeiro.mostrarMais(true)">Mostrar todos</button></td></tr>' : '');
+      if (dest) {
+        financeiro._destacar = null;
+        setTimeout(() => {
+          try {
+            const tr = tbody.querySelector('tr[data-fin-id="' + (window.CSS && CSS.escape ? CSS.escape(dest) : dest) + '"]');
+            if (tr) { tr.scrollIntoView({ block: 'center' }); setTimeout(() => tr.classList.remove('fin-editado'), 2500); }
+          } catch (e) {}
+        }, 60);
+      }
     }
 
     /* Totalizadores expandidos */
     const tot = document.getElementById('fin-totalizadores');
-    const totPrev = list.reduce((s, x) => s + (parseFloat(x.valor_previsto) || 0), 0);
-    const totRec  = list.reduce((s, x) => s + (parseFloat(x.valor_recebido) || 0), 0);
-    const totGlo  = list.reduce((s, x) => s + (parseFloat(x.glosa) || 0), 0);
-    const totDif  = totPrev - totRec - totGlo;
+    /* totais pela regra única: cancelado não soma, pago/cortesia não é "a receber" */
+    const vals = list.map(x => financeiro.valores(x));
+    const totPrev = vals.reduce((s, v) => s + v.prev, 0);
+    const totRec  = vals.reduce((s, v) => s + v.rec, 0);
+    const totGlo  = vals.reduce((s, v) => s + v.glo, 0);
+    const totDif  = vals.reduce((s, v) => s + v.aReceber, 0);
     const totPagos = list.filter(x => x.pago).length;
     const totPend = list.filter(x => !x.pago && (x.status === 'pendente' || x.status === 'faturado' || !x.status)).length;
     const totPeric = list.filter(x => x.periciado).length;
@@ -51287,7 +51394,12 @@ const financeiro = {
   /* Os filtros já valiam ao digitar; o botão existe para DIZER que valeram.
      Sem ele, e sem a contagem, quem olha a tela não tem como saber se a
      lista está filtrada ou se simplesmente não há mais registro. */
+  mostrarMais(todos) {
+    financeiro._limite = todos ? Infinity : (financeiro._limite || 400) + 400;
+    financeiro.render();
+  },
   aplicarFiltros() {
+    financeiro._limite = 400;
     financeiro.render();
     const n = financeiro.filtrar().length;
     const total = (store.list('financeiro') || []).length;
@@ -51348,15 +51460,19 @@ const financeiro = {
      aconteceu; `_createdAt` é quando entrou no sistema. */
   _dataDoLancamento(x, base) {
     if (base === 'registro') {
+      /* data LOCAL: lançado às 22h do dia 31 é do dia 31, não do dia 1º (UTC) */
       const c = x._createdAt || x._updatedAt || '';
-      return c ? String(c).slice(0, 10) : '';
+      if (!c) return '';
+      const d = new Date(c);
+      if (isNaN(d)) return String(c).slice(0, 10);
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     }
     const d = x.data_proc || x.data || (x._createdAt ? String(x._createdAt).slice(0, 10) : '');
     return d ? String(d).slice(0, 10) : '';
   },
   lancamentosDoPeriodo(de, ate, base) {
     const d0 = String(de || ''), d1 = String(ate || '');
-    return (store.list('financeiro') || []).filter(x => {
+    return financeiro.ativos(store.list('financeiro')).filter(x => {
       const d = financeiro._dataDoLancamento(x, base);
       if (!d) return false;
       if (d0 && d < d0) return false;
@@ -51397,11 +51513,17 @@ const financeiro = {
     });
     atualizar();
   },
-  _auditoria(formato) {
+  _auditoria(formato, jaBuscou) {
     const de = (document.getElementById('aud-de') || {}).value || '';
     const ate = (document.getElementById('aud-ate') || {}).value || '';
     const base = (document.getElementById('aud-base') || {}).value || 'registro';
     if (de && ate && de > ate) { toast('A data inicial é posterior à final.', 'warn'); return; }
+    const corte = (cloudRel.JANELA || {}).financeiro;
+    if (!jaBuscou && de && corte && de < corte && !financeiro._periodosTrazidos.has(de + '|' + ((!ate || ate >= corte) ? '' : ate))) {
+      toast('☁️ Buscando na nuvem os lançamentos antigos do período — o relatório sai em seguida.', 'info');
+      financeiro.buscarNaNuvem(de, ate).then(() => financeiro._auditoria(formato, true), () => financeiro._auditoria(formato, true));
+      return;
+    }
     const lista = financeiro.lancamentosDoPeriodo(de, ate, base);
     if (!lista.length) { toast('Nenhum lançamento no período escolhido.', 'warn'); return; }
     modal.close();
@@ -51418,7 +51540,8 @@ const financeiro = {
     ].map(q).join(';')];
     let tp = 0, tr = 0, tg = 0;
     lista.forEach(x => {
-      const prev = num(x.valor_previsto), rec = num(x.valor_recebido), glo = num(x.glosa);
+      const vv = financeiro.valores(x);
+      const prev = vv.prev, rec = vv.rec, glo = vv.glo;
       tp += prev; tr += rec; tg += glo;
       const codigos = Array.isArray(x.codigos)
         ? x.codigos.map(c => [c.codigo, c.descricao].filter(Boolean).join(' ')).filter(Boolean).join(' | ') : '';
@@ -51429,7 +51552,7 @@ const financeiro = {
         x.procedimento || '', codigos, x.cirurgiao || '', x.hospital || '',
         /* Vírgula decimal: a planilha brasileira soma a coluna sem conversão. */
         prev.toFixed(2).replace('.', ','), rec.toFixed(2).replace('.', ','), glo.toFixed(2).replace('.', ','),
-        (prev - rec - glo).toFixed(2).replace('.', ','),
+        vv.aReceber.toFixed(2).replace('.', ','),
         x.status || '', x.pago ? 'Sim' : 'Não', x.data_pagamento || ''
       ].map(q).join(';'));
     });
@@ -51524,7 +51647,11 @@ const financeiro = {
     _moeda(n) { return Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
     _sn(v) { return v === true || /^(sim|s|true|1)$/i.test(String(v == null ? '' : v).trim()) ? 'Sim' : (v === false || /^(n[aã]o|n|false|0)$/i.test(String(v == null ? '' : v).trim()) ? 'Não' : ''); },
     _codigos(x) { return Array.isArray(x.codigos) ? x.codigos.filter(c => c && (c.codigo || c.descricao)) : []; },
-    _plano(x) { return String(x.convenio || x.plano || '').trim(); },
+    /* mesmo agrupamento do filtro da lista: "Unimed" e "UNIMED" são um plano só */
+    _plano(x) {
+      try { const k = financeiro.planos._chave(x); if (k) return k; } catch (e) {}
+      return String(x.convenio || x.plano || '').trim();
+    },
     _imp(x) { return x._importUnimed || {}; },
     ROTULO_TIPO: { procedimento: 'Procedimento / Cirurgia', consulta_geral: 'Consulta geral', consulta_dor: 'Consulta de dor', consulta_pre: 'Consulta pré-anestésica', outro: 'Outro' },
     /* [chave, rótulo, grupo, tipo, largura relativa, leitura] */
@@ -51564,10 +51691,10 @@ const financeiro = {
         ['protocolo', 'Protocolo', 'Autorização e guia', 't', 16, x => R._imp(x).protocolo || x.protocolo || ''],
         ['competencia', 'Competência', 'Autorização e guia', 't', 14, x => (R._imp(x).competencias || []).join(', ') || x.competencia || ''],
         ['valor_previsto', 'Previsto', 'Valores', 'm', 18, x => n(x.valor_previsto)],
-        ['valor_recebido', 'Recebido', 'Valores', 'm', 18, x => n(x.valor_recebido)],
+        ['valor_recebido', 'Recebido', 'Valores', 'm', 18, x => financeiro.valores(x).rec],
         ['glosa', 'Glosa', 'Valores', 'm', 16, x => n(x.glosa)],
-        ['a_receber', 'A receber', 'Valores', 'm', 18, x => (String(x.status || '').toLowerCase() === 'cortesia') ? 0 : n(x.valor_previsto) - n(x.valor_recebido) - n(x.glosa)],
-        ['motivo_glosa', 'Motivo da glosa', 'Valores', 't', 34, x => R._imp(x).motivosGlosa || R._codigos(x).map(c => c.obs).filter(Boolean).join(' | ') || ''],
+        ['a_receber', 'A receber', 'Valores', 'm', 18, x => financeiro.valores(x).aReceber],
+        ['motivo_glosa', 'Motivo da glosa', 'Valores', 't', 34, x => R._imp(x).motivosGlosa || R._codigos(x).map(c => c.obs || c.observacao).filter(Boolean).join(' | ') || ''],
         ['status', 'Status', 'Valores', 't', 16, x => x.status || ''],
         ['pago', 'Pago', 'Valores', 't', 9, x => (financeiro.ehQuitado(x.status) || x.pago === true) ? 'Sim' : 'Não'],
         ['data_pagamento', 'Data do pagamento', 'Valores', 'd', 16, x => x.data_pagamento || x.data_recebimento || ''],
@@ -51641,7 +51768,7 @@ const financeiro = {
     _totais(lista) {
       const R = financeiro.rel, t = { n: lista.length, prev: 0, rec: 0, glo: 0, arec: 0 };
       const aRec = R._def('a_receber').get;
-      lista.forEach(x => { t.prev += R._num(x.valor_previsto); t.rec += R._num(x.valor_recebido); t.glo += R._num(x.glosa); t.arec += aRec(x); });
+      lista.forEach(x => { const vv = financeiro.valores(x); t.prev += vv.prev; t.rec += vv.rec; t.glo += vv.glo; t.arec += aRec(x); });
       return t;
     },
     _porPlano(lista) {
@@ -51779,6 +51906,7 @@ const financeiro = {
     _atualizarPrevia() {
       const R = financeiro.rel, el = document.getElementById('relfin-previa'); if (!el) return;
       const cfg = R._daTela(), lista = R.filtrar(cfg), t = R._totais(lista);
+      try { const p = R._periodo(cfg); financeiro._garantirNuvem(p.de, p.ate, () => R._atualizarPrevia()); } catch (e) {}
       const nc = document.getElementById('relfin-ncol');
       if (nc) nc.textContent = cfg.colunas.length + ' escolhida(s)' + (R._largo(cfg.colunas) ? ' — sai com a folha deitada' : '');
       el.replaceChildren();
