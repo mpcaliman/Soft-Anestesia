@@ -325,7 +325,8 @@ await test('Financeiro: fechamento de caixa soma recebido/previsto e salva snaps
   });
   assert(r.somaRec === 1100, 'recebido do dia deveria ser 1100, veio ' + r.somaRec);
   assert(r.somaPrev === 1800, 'previsto deveria ser 1800, veio ' + r.somaPrev);
-  assert(r.aReceber === 900, 'a receber deveria ser 900, veio ' + r.aReceber);
+  /* C foi pago (valor_pago 300): não é mais "a receber" — 100 (A) + 500 (B) */
+  assert(r.aReceber === 600, 'a receber deveria ser 600 (o particular pago não é dívida), veio ' + r.aReceber);
   assert(r.modal, 'modal de caixa deveria abrir');
   assert(r.nFech === 1 && r.fechRec === 1100, 'snapshot deveria salvar com recebido 1100');
   await page.close();
