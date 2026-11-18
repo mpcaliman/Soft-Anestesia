@@ -25989,6 +25989,35 @@ await test('SRPA feita pelo módulo SRPA entra no atendimento da ficha (Meu dia 
   await page.close();
 });
 
+await test('Barra de opções também no fim da página: espelha a de cima e aciona o mesmo botão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const fimDe = mod => document.querySelector('#module-' + mod + ' > .action-bar-fim');
+    out.nosModulos = ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao', 'documentos', 'risco', 'financeiro', 'orcamento', 'agenda', 'pacientes']
+      .every(m => !!fimDe(m) && fimDe(m).querySelectorAll('button').length > 0);
+    out.semNoDashboard = !fimDe('dashboard') && !fimDe('ajustes');
+    const fim = fimDe('pre');
+    out.ultimo = fim === document.getElementById('module-pre').lastElementChild;
+    out.semExpandir = !Array.from(fim.querySelectorAll('button')).some(b => /Expandir/.test(b.textContent));
+    out.semIds = !fim.querySelector('[id]');
+    const salvar = Array.from(fim.querySelectorAll('button')).find(b => /Salvar$/.test(b.textContent.trim()));
+    const orig = pre.salvar; let chamou = 0;
+    pre.salvar = () => { chamou++; };
+    try { salvar.click(); } finally { pre.salvar = orig; }
+    out.aciona = chamou === 1;
+    /* botão novo no topo aparece embaixo */
+    const topo = document.querySelector('#module-pre > .action-bar');
+    const x = document.createElement('button'); x.className = 'btn'; x.textContent = 'Teste espelho'; topo.appendChild(x);
+    await new Promise(res => setTimeout(res, 100));
+    out.espelha = Array.from(fim.querySelectorAll('button')).some(b => b.textContent === 'Teste espelho');
+    x.remove();
+    return out;
+  });
+  assert(r.nosModulos && r.semNoDashboard && r.ultimo && r.semExpandir && r.semIds && r.aciona && r.espelha, 'barra no fim: ' + JSON.stringify(r));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
