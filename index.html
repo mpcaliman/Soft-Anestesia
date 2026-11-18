@@ -4921,7 +4921,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-18a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-18b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8783,6 +8783,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" onclick="financeiro.caixa.abrir()" title="Fechamento de caixa do dia: recebido, realizado e a receber, por convênio e forma de pagamento"><span class="icon">🧾</span> Fechar caixa</button>
     <button class="btn" onclick="importFin.abrir()" title="Importar a aba Consolidado da conciliação (CSV) como lançamentos do Financeiro"><span class="icon">📥</span> Importar planilha</button>
     <button class="btn" onclick="importUnimed.abrir()" title="Importar o pacote da conciliação catálogo × Unimed (.zip) e revisar os vínculos"><span class="icon">🧾</span> Conciliação Unimed</button>
+    <button class="btn btn-primary" onclick="extratoConc.abrir()" title="Lê o PDF de pagamento da Coopanest ou da Unimed neste aparelho e concilia com os lançamentos"><span class="icon">📑</span> Conciliar extrato (PDF)</button>
+    <button class="btn" onclick="extratoConc.abrirValores()" title="Quanto cada convênio pagou por código: porte cirúrgico × porte anestésico × valor — e usar no Gerar financeiro"><span class="icon">📈</span> Valores pagos</button>
     <!-- UM RELATÓRIO SÓ. "Relatório do período" e "Relatório mensal" faziam a
          mesma coisa com menos opções (e o mensal sem o plano). O relatório
          abaixo cobre os dois: período ou mês, filtros, colunas e totais por plano. -->
@@ -54951,6 +54953,7 @@ const agenda = {
     <div class="gs-results" id="gs-results"></div>
   </div>
 </div>
+<script src="src/finance/extrato-conciliacao.js"></script>
 <script src="src/ui/global-command-search.js"></script>
 </body>
 </html>
