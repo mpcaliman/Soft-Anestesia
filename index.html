@@ -403,6 +403,13 @@ html[data-theme="dark"] .theme-toggle:hover {
 }
 .autosave-toggle input { accent-color: var(--primary); }
 
+.action-bar-fim {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 18px 0 24px; padding: 10px 22px;
+  background: var(--surface, #fff); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.action-bar-fim:empty { display: none; }
+@media (max-width: 760px) { .action-bar-fim { padding: 10px 12px; gap: 6px; } .action-bar-fim .btn { min-height: 38px; } }
 .action-bar {
   background: #fff;
   border-bottom: 1px solid var(--border);
@@ -4914,7 +4921,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-17c</b><br>
+    v7.1 · build <b id="build-tag">2026-11-18a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -17504,6 +17511,58 @@ const heranca = {
   }
 };
 try { if (document.readyState !== 'loading') heranca.instalar(); else document.addEventListener('DOMContentLoaded', () => heranca.instalar()); } catch (e) {}
+
+/* ============================================================================
+   BARRA DE OPÇÕES TAMBÉM NO FIM DA PÁGINA
+   Quem termina de preencher está no fim do formulário; subir tudo para
+   salvar, finalizar ou imprimir é o caminho mais longo para a última ação.
+   A barra de baixo é um ESPELHO da de cima: cada botão aciona o original —
+   mesma função, mesmo estado, sem segunda cópia de lógica. Muda a de cima,
+   a de baixo é refeita. "Expandir tudo" (leitura da tela) e os menus
+   suspensos ficam só no topo.
+============================================================================ */
+const barraFim = {
+  SEM: ['dashboard', 'ajustes'],
+  _refazer(mod, topo, fim) {
+    fim.textContent = '';
+    Array.from(topo.children).forEach(orig => {
+      if (orig.classList.contains('action-divider')) {
+        const d = document.createElement('div'); d.className = 'action-divider'; fim.appendChild(d); return;
+      }
+      if (orig.tagName !== 'BUTTON') return;                    /* menus suspensos ficam no topo */
+      if (/^btn-expandir-/.test(orig.id || '')) return;
+      if (orig.style.display === 'none' || orig.hidden) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = orig.className;
+      b.innerHTML = orig.innerHTML;
+      if (orig.title) b.title = orig.title;
+      b.disabled = !!orig.disabled;
+      b.addEventListener('click', e => { e.preventDefault(); orig.click(); });
+      fim.appendChild(b);
+    });
+  },
+  instalar() {
+    document.querySelectorAll('.module[data-module]').forEach(m => {
+      const mod = m.dataset.module;
+      if (barraFim.SEM.indexOf(mod) >= 0) return;
+      const topo = m.querySelector(':scope > .action-bar');
+      if (!topo || m.querySelector(':scope > .action-bar-fim')) return;
+      const fim = document.createElement('div');
+      fim.className = 'action-bar-fim no-print';
+      fim.setAttribute('aria-label', 'Opções (fim da página)');
+      m.appendChild(fim);
+      barraFim._refazer(mod, topo, fim);
+      let agendado = false;
+      new MutationObserver(() => {
+        if (agendado) return;
+        agendado = true;
+        requestAnimationFrame(() => { agendado = false; barraFim._refazer(mod, topo, fim); });
+      }).observe(topo, { childList: true, subtree: true, attributes: true, characterData: true });
+    });
+  }
+};
+try { if (document.readyState !== 'loading') barraFim.instalar(); else document.addEventListener('DOMContentLoaded', () => barraFim.instalar()); } catch (e) {}
 
 const pre = {
   formId: 'form-pre',
