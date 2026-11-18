@@ -54,9 +54,18 @@ const meuDia = {
     const hoje = utils.hojeISO();
     const casos = {};   /* token explícito do caso → linha */
     let semId = 0;
+    /* mesmo _caseId e mesmo nome = mesmo atendimento, ainda que um documento
+       traga CPF e o outro só nascimento (chaves fortes diferentes) */
+    const porCaso = {};
     const caso = (nome, item, mod) => {
       if (!meuDia._norm(nome)) return null;
-      const k = meuDia._caseToken(mod, item) || ('isolado:' + mod + ':' + (++semId));
+      let k = meuDia._caseToken(mod, item) || ('isolado:' + mod + ':' + (++semId));
+      const cid = item && mod !== 'financeiro' ? item._caseId : '';
+      if (cid && !casos[k]) {
+        const outro = porCaso[cid];
+        if (outro && casos[outro] && meuDia._norm(casos[outro].nome) === meuDia._norm(nome)) k = outro;
+      }
+      if (cid && !porCaso[cid]) porCaso[cid] = k;
       if (!casos[k]) casos[k] = { nome, _caseToken: k, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null, fins: [], consulta: null, pre: null };
       return casos[k];
     };
@@ -111,6 +120,24 @@ const meuDia = {
       const c = caso(nomeDe(x), x, 'recuperacao'); if (!c) return;
       c.srpa = x;
       if (!c.procedimento) c.procedimento = x.procedimento || '';
+    });
+    /* SRPA solta (caso só dela) e ficha do mesmo dia, mesmo nome e sem SRPA:
+       é o mesmo atendimento, gravado antes de a SRPA herdar o caso da ficha.
+       Só junta quando há UMA ficha assim e as chaves fortes não divergem. */
+    Object.keys(casos).forEach(k => {
+      const c = casos[k];
+      if (!c || !c.srpa || c.ficha || c.agenda || c.pre || c.consulta) return;
+      const chaveS = linker._chavePaciente(c.srpa);
+      const alvos = Object.keys(casos).filter(j => {
+        const o = casos[j];
+        if (j === k || !o || !o.ficha || o.srpa || meuDia._norm(o.nome) !== meuDia._norm(c.nome)) return false;
+        const chaveF = linker._chavePaciente(o.ficha);
+        return !(chaveS && chaveF && chaveS !== chaveF && chaveS.slice(0, 4) === chaveF.slice(0, 4));
+      });
+      if (alvos.length !== 1) return;
+      casos[alvos[0]].srpa = c.srpa;
+      if (!casos[alvos[0]].procedimento) casos[alvos[0]].procedimento = c.procedimento;
+      delete casos[k];
     });
     store.list('financeiro').filter(x => x.data_proc === hoje).forEach(x => {
       const c = caso(x.paciente, x, 'financeiro'); if (!c) return;

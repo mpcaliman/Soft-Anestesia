@@ -3,6 +3,13 @@
 /* Apresentação da Agenda. Lê compromissos e delega ações explícitas ao
    módulo agenda; não salva, exclui, sincroniza ou inicia atendimentos. */
 const agendaView = {
+  /* Consulta com modalidade: "Consulta · Dor", "Consulta · Pré", "Consulta · Geral" */
+  MODALIDADES: { pre: 'Pré', consulta_geral: 'Geral', consulta_dor: 'Dor' },
+  tipoTexto(x) {
+    const t = (x && x.tipo) || '';
+    const m = x && agendaView.MODALIDADES[x.modalidade];
+    return t && m ? t + ' · ' + m : t;
+  },
   /* formatos padrão (utils). Numa tela isolada (teste de fronteira) sem
      utils, busca segue sem acento e o resto passa como veio. */
   _fmt(nome, ...a) {
@@ -106,7 +113,7 @@ const agendaView = {
               <span class="ag-dia-pac">${utils.escapeHTML(x.paciente || '(sem nome)')}</span>
               <span class="status-pill ${x.status || ''}">${utils.escapeHTML(x.status || '—')}</span>
             </div>
-            <div class="ag-dia-item-sub">${utils.escapeHTML([x.tipo, x.procedimento, x.cirurgiao, x.local].filter(Boolean).join(' · '))}</div>
+            <div class="ag-dia-item-sub">${utils.escapeHTML([agendaView.tipoTexto(x), x.procedimento, x.cirurgiao, x.local].filter(Boolean).join(' · '))}</div>
             <div class="ag-dia-item-acoes">
               <button class="btn btn-xs btn-success" onclick="agenda.atender(${utils.jsArg(x._id)})">▶ Atender</button>
               <button class="btn btn-xs" onclick="agenda.editar(${utils.jsArg(x._id)})">Editar</button>
@@ -172,7 +179,12 @@ const agendaView = {
     return list.filter(x => {
       if (fDe && (!x.data || x.data < fDe)) return false;
       if (fAte && (!x.data || x.data > fAte)) return false;
-      if (fTipo && x.tipo !== fTipo) return false;
+      if (fTipo) {
+        /* "Consulta|consulta_dor": tipo e modalidade */
+        const [t, m] = fTipo.split('|');
+        if (x.tipo !== t) return false;
+        if (m && (x.modalidade || '') !== m) return false;
+      }
       if (fStatus && x.status !== fStatus) return false;
       if (fBusca) {
         if (!agendaView._fmt('contem', (x.paciente || '') + ' ' + (x.cirurgiao || '') + ' ' + (x.procedimento || ''), fBusca)) return false;
@@ -206,7 +218,7 @@ const agendaView = {
       <tr>
         <td data-label="Data">${utils.formatarData(x.data)}</td>
         <td data-label="Hora">${utils.escapeHTML(x.hora || '')}</td>
-        <td data-label="Tipo">${utils.escapeHTML(x.tipo || '')}</td>
+        <td data-label="Tipo">${utils.escapeHTML(agendaView.tipoTexto(x))}</td>
         <td data-label="Paciente">${utils.escapeHTML(x.paciente || '')}</td>
         <td data-label="Procedimento">${utils.escapeHTML(x.procedimento || '')}</td>
         <td data-label="Profissional">${utils.escapeHTML(x.cirurgiao || '')}</td>

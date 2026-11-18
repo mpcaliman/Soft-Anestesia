@@ -201,6 +201,7 @@ const printPreview = {
     try {
       let html = builder();
       try { html = printPreview._comVersoes(mod, html); } catch (e) {}
+      try { html = printPreview._comHerdados(mod, html); } catch (e) {}
       /* termo, receituário, documento e risco não têm "Informações
          complementares" no corpo: o que chegou depois por adendo entra aqui,
          no fim do documento, como parte dele */
@@ -273,6 +274,37 @@ const printPreview = {
     const marca = '<div class="pp-footer"';
     const pos = html.lastIndexOf(marca);
     return pos >= 0 ? html.slice(0, pos) + blocos + nota + html.slice(pos) : html + blocos + nota;
+  },
+  /* DADO DE REGISTRO ANTERIOR — só na via interna.
+     Lista os campos que vieram de um atendimento anterior e em que estado
+     ficaram (não revisado / revisado / atualizado). Usa a mesma classe dos
+     quadros de retificação: a via do paciente sai sem ele. */
+  _comHerdados(mod, html) {
+    if (['pre', 'consulta', 'anestesia'].indexOf(mod) < 0) return html;
+    const reg = printPreview._registroDoFormulario(mod);
+    /* assinado vale o gravado; em edição, o que está na tela */
+    let mapa = reg && reg._finalizado ? reg._herdados : null;
+    if (!mapa) { try { mapa = heranca.coletar(mod); } catch (e) { mapa = null; } }
+    if ((!mapa || !Object.keys(mapa).length) && reg) mapa = reg._herdados;
+    if (!mapa || !Object.keys(mapa).length) return html;
+    const E = utils.escapeHTML;
+    const f = document.getElementById('form-' + mod);
+    const rotulo = nome => {
+      const el = f && f.querySelector('[name="' + nome + '"]');
+      try { return el ? heranca._rotuloCampo(el) : nome; } catch (e) { return nome; }
+    };
+    const EST = { herdado: 'não revisado', revisado: 'revisado, sem alteração', atualizado: 'atualizado neste atendimento' };
+    const itens = Object.keys(mapa).map(nome => {
+      const i = mapa[nome] || {};
+      return '<li>' + E(rotulo(nome)) + ' — de ' + E(i.de || 'registro anterior') +
+        (i.data ? ' de ' + E(utils.formatarData(i.data)) : '') + ' · <b>' + E(EST[i.estado] || i.estado || '') + '</b></li>';
+    }).join('');
+    const bloco = '<div class="pp-retificacao-bloco pp-herdados" style="margin-top:14px;padding-top:6px;border-top:1px solid #e0b52b;break-inside:avoid;page-break-inside:avoid">' +
+      '<div style="font-size:9.5pt;font-weight:700;color:#6b4e00">DADOS TRAZIDOS DE REGISTRO ANTERIOR (uso interno)</div>' +
+      '<ul style="margin:4px 0 6px 18px;padding:0;font-size:9pt;line-height:1.4">' + itens + '</ul></div>';
+    const marca = '<div class="pp-footer"';
+    const pos = html.lastIndexOf(marca);
+    return pos >= 0 ? html.slice(0, pos) + bloco + html.slice(pos) : html + bloco;
   },
   abrir() {
     try {

@@ -25782,6 +25782,213 @@ await test('Cadastro: nome corrigido continua achável (nome anterior + Nº de c
   await page.close();
 });
 
+await test('Dado anterior em amarelo: vem marcado, editar ou revisar tira, fica gravado e só sai na via interna', async () => {
+  const page = await novaPagina();
+  await page.evaluate(async () => {
+    const espera = ms => new Promise(res => setTimeout(res, ms));
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('pre', []); store.setList('anestesia', []);
+    store.setList('consulta', [{ _id: 'consH', nome: 'Laura Heranca Teste', data: '2026-01-10', alergias: 'Penicilina', comorbidades: 'HAS', medicacoes: 'Losartana', _finalizado: true }]);
+    store.setList('agenda', [{ _id: 'agH', paciente: 'Laura Heranca Teste', tipo: 'Pré-anestésico', data: hoje, procedimento: 'Colecistectomia' }]);
+    agenda._iniciarAtendimento('agH', 'pre');
+    const i = agenda._antAtual.findIndex(a => a.doc._id === 'consH');
+    modal.close(); agenda._usarFonte('agH', 'pre', i); await espera(1300);
+    try { modal.close(); } catch (e) {}
+  });
+  const r1 = await page.evaluate(() => {
+    const f = document.getElementById('form-pre');
+    const el = n => f.querySelector('[name="' + n + '"]');
+    return {
+      amarelo: el('alergias').classList.contains('campo-herdado') && el('comorbidades').classList.contains('campo-herdado'),
+      origem: /Consulta de 10\/01\/2026/.test(el('alergias').title),
+      nomeNaoAmarelo: !el('nome').classList.contains('campo-herdado'),
+      pendentes: heranca.pendentes('pre').length
+    };
+  });
+  /* edição de quem usa tira o amarelo */
+  await page.evaluate(() => {
+    /* a pré mostra uma seção por vez: deixa o campo à vista para digitar */
+    let n = document.querySelector('#form-pre [name="alergias"]');
+    while (n) { if (getComputedStyle(n).display === 'none') n.style.display = 'block'; n = n.parentElement; }
+  });
+  await page.fill('#form-pre [name="alergias"]', 'Penicilina e dipirona');
+  const r2 = await page.evaluate(async () => {
+    const out = {};
+    const f = document.getElementById('form-pre');
+    const el = n => f.querySelector('[name="' + n + '"]');
+    out.editadoSai = !el('alergias').classList.contains('campo-herdado');
+    /* "✓ Revisado" */
+    el('comorbidades').focus();
+    if (document.activeElement !== el('comorbidades')) heranca._mostrarBotao(el('comorbidades'));   /* seção recolhida no teste */
+    const b = document.getElementById('herdado-revisado');
+    out.botao = !!b && b.style.display === 'block';
+    b.click();
+    out.revisadoSai = !el('comorbidades').classList.contains('campo-herdado');
+    out.medsAindaAmarelo = el('medicacoes').classList.contains('campo-herdado');
+    /* finalizar com amarelo pendente pergunta antes */
+    const conf = window.confirm; let perguntou = '';
+    window.confirm = m => { perguntou = m; return false; };
+    pre.salvar({ finalizar: true });
+    window.confirm = conf;
+    out.perguntou = /não foram revisados/.test(perguntou) && !(f.querySelector('[name="_id"]') || {}).value;
+    /* gravar (rascunho) leva o rastro */
+    pre.salvar({});
+    const id = f.querySelector('[name="_id"]').value;
+    const doc = store.getById('pre', id);
+    const h = doc._herdados || {};
+    out.gravado = h.alergias && h.alergias.estado === 'atualizado' && h.comorbidades.estado === 'revisado' && h.medicacoes.estado === 'herdado';
+    /* reabrir: o que ainda era antigo volta amarelo */
+    pre.novo && (state.dirty = false); pre._zerar();
+    out.limpou = !f.querySelector('.campo-herdado');
+    pre.carregar(store.getById('pre', id)); await new Promise(res => setTimeout(res, 300));
+    out.restaurou = el('medicacoes').classList.contains('campo-herdado') && !el('alergias').classList.contains('campo-herdado');
+    /* impressão: via interna lista; via do paciente não */
+    printPreview.abrir(); await new Promise(res => setTimeout(res, 300));
+    const ppp = document.getElementById('ppp');
+    out.tela = /DADOS TRAZIDOS DE REGISTRO ANTERIOR/.test(ppp.textContent) && /não revisado/.test(ppp.textContent);
+    out.viaPaciente = !/DADOS TRAZIDOS/.test(printPreview._htmlDaFolha(ppp));
+    printPreview.alternarRetificacoes(true);
+    out.viaInterna = /DADOS TRAZIDOS DE REGISTRO ANTERIOR/.test(printPreview._htmlDaFolha(ppp));
+    printPreview.alternarRetificacoes(false);
+    printPreview.fechar();
+    store.setList('pre', []); store.setList('consulta', []); store.setList('agenda', []);
+    return out;
+  });
+  assert(r1.amarelo && r1.origem && r1.nomeNaoAmarelo && r1.pendentes >= 3, 'campos trazidos ficam amarelos com a origem; identificação não: ' + JSON.stringify(r1));
+  assert(r2.editadoSai && r2.botao && r2.revisadoSai && r2.medsAindaAmarelo, 'editar ou "✓ Revisado" tira o amarelo: ' + JSON.stringify(r2));
+  assert(r2.perguntou, 'finalizar com dado anterior não revisado pergunta antes: ' + JSON.stringify(r2));
+  assert(r2.gravado && r2.limpou && r2.restaurou, 'o rastro (atualizado/revisado/não revisado) fica gravado e volta ao reabrir: ' + JSON.stringify(r2));
+  assert(r2.tela && r2.viaInterna && r2.viaPaciente, 'só a via interna lista os dados anteriores: ' + JSON.stringify(r2));
+  await page.close();
+});
+
+await test('Escolher o paciente num atendimento novo oferece o pré-lançamento e os registros anteriores', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const espera = ms => new Promise(res => setTimeout(res, ms));
+    store.setList('consulta', []);
+    store.setList('pre', [{ _id: 'preSec', nome: 'Rui Sugestao Teste', data: new Date().toISOString().slice(0, 10), alergias: 'pré-lançado' }]);
+    location.hash = '#consulta'; await espera(300);
+    consulta._zerar ? consulta._zerar() : utils.clearForm('form-consulta');
+    heranca._jaSugerido = {};
+    heranca.sugerir('consulta', { nome: 'Rui Sugestao Teste' });
+    await espera(100);
+    out.janela = document.getElementById('modal-backdrop').classList.contains('show') && /Usar dados/.test(document.getElementById('modal-body').innerHTML);
+    modal.close(); heranca._usar(0); await espera(200);
+    const el = document.querySelector('#form-consulta [name="alergias"]');
+    out.usou = !!el && el.value === 'pré-lançado' && el.classList.contains('campo-herdado');
+    /* documento já gravado não pergunta */
+    heranca._jaSugerido = {};
+    const h = document.querySelector('#form-consulta [name="_id"]') || (() => { const x = document.createElement('input'); x.type = 'hidden'; x.name = '_id'; document.getElementById('form-consulta').appendChild(x); return x; })();
+    h.value = 'existente';
+    heranca.sugerir('consulta', { nome: 'Rui Sugestao Teste' });
+    out.naoPerguntaExistente = !document.getElementById('modal-backdrop').classList.contains('show');
+    h.value = '';
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.janela && r.usou && r.naoPerguntaExistente, 'sugestão ao escolher o paciente: ' + JSON.stringify(r));
+  await page.close();
+});
+
+await test('Agenda: modalidade da consulta (pré / geral / dor) decide o que o Atender abre', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const espera = ms => new Promise(res => setTimeout(res, ms));
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('pre', []); store.setList('consulta', []);
+    location.hash = '#agenda'; await espera(300);
+    agenda.editar(null);
+    const f = document.getElementById('form-agenda');
+    const w = document.getElementById('ag-modalidade-wrap');
+    out.escondido = w.style.display === 'none';
+    f.querySelector('[name="tipo"]').value = 'Consulta'; agenda._mostrarModalidade();
+    out.aparece = w.style.display === '';
+    f.querySelector('[name="paciente"]').value = 'Ana Modalidade';
+    f.querySelector('[name="modalidade"]').value = 'consulta_dor';
+    agenda.salvar();
+    const ag = store.list('agenda').find(x => x.paciente === 'Ana Modalidade');
+    out.gravou = ag && ag.modalidade === 'consulta_dor';
+    out.lista = agendaView.tipoTexto(ag) === 'Consulta · Dor';
+    agenda.atender(ag._id); await espera(900);
+    out.abriuDor = state.currentModule === 'consulta' && document.querySelector('#form-consulta [name="tipo_atendimento"]').value === 'consulta_dor';
+    try { modal.close(); } catch (e) {}
+    /* consulta sem modalidade: pergunta */
+    store.setList('agenda', [{ _id: 'agS', paciente: 'Beto Sem Modalidade', tipo: 'Consulta', data: hoje }]);
+    agenda.atender('agS'); await espera(100);
+    out.pergunta = /Qual consulta/.test(document.getElementById('modal-title').textContent);
+    modal.close(); agenda._definirModalidade('agS', 'pre'); await espera(900);
+    out.preAbriu = state.currentModule === 'pre' && store.getById('agenda', 'agS').modalidade === 'pre';
+    try { modal.close(); } catch (e) {}
+    store.setList('agenda', []);
+    return out;
+  });
+  assert(r.escondido && r.aparece && r.gravou && r.lista, 'campo de modalidade na agenda: ' + JSON.stringify(r));
+  assert(r.abriuDor && r.pergunta && r.preAbriu, 'Atender segue a modalidade e pergunta quando falta: ' + JSON.stringify(r));
+  await page.close();
+});
+
+await test('Financeiro: "Gerar lançamento" explícito gera mesmo com o automático desligado e avisa quando não gera', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('financeiro', []);
+    const doc = store.save('consulta', { nome: 'Caio Explicito', data: hoje, convenio: 'Particular', tipo_atendimento: 'consulta_geral', _finalizado: true });
+    const antes = localStorage.getItem('medsys.v4.autofin');
+    localStorage.setItem('medsys.v4.autofin', '0');
+    try {
+      out.autoRecusa = fin.fromDoc('consulta', doc) === null && /desligado/.test(fin._motivo);
+      out.explicitoGera = !!(fin.fromDoc('consulta', doc, { explicito: true }) || {}).item;
+      /* janela: recusa aparece em aviso */
+      store.setList('financeiro', []);
+      const semNome = store.save('consulta', { nome: '', data: hoje, _finalizado: true });
+      const msgs = []; const t = window.toast; window.toast = (m) => msgs.push(String(m));
+      fin.finalizacao._ctx = { mod: 'consulta', docId: semNome._id, doc: semNome };
+      fin.finalizacao.confirmar();
+      window.toast = t;
+      out.avisou = msgs.some(m => /NÃO foi gerado/.test(m));
+    } finally {
+      if (antes == null) localStorage.removeItem('medsys.v4.autofin'); else localStorage.setItem('medsys.v4.autofin', antes);
+      store.setList('consulta', []); store.setList('financeiro', []);
+    }
+    return out;
+  });
+  assert(r.autoRecusa && r.explicitoGera && r.avisou, 'financeiro explícito: ' + JSON.stringify(r));
+  await page.close();
+});
+
+await test('SRPA feita pelo módulo SRPA entra no atendimento da ficha (Meu dia mostra SRPA ✓)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('recuperacao', []); store.setList('anestesia', []); store.setList('agenda', []);
+    const ficha = store.save('anestesia', { paciente: { nome: 'Laisa SRPA Teste', cpf: '529.982.247-25' }, procedimento: { data: hoje, descricao: 'Cisto sinovial' }, data_anestesia: hoje, _finalizado: true });
+    location.hash = '#recuperacao'; await new Promise(res => setTimeout(res, 300));
+    recuperacao._zerar();
+    const f = document.getElementById('form-recuperacao');
+    f.querySelector('[name="nome"]').value = 'Laisa SRPA Teste';
+    f.querySelector('[name="data"]').value = hoje;
+    recuperacao.salvar({});
+    const srpa = store.list('recuperacao')[0];
+    out.mesmoCaso = !!srpa && srpa._caseId === ficha._caseId;
+    out.ligada = !!(store.getById('anestesia', ficha._id)._links || {}).recuperacao_id;
+    const casos = meuDia.coletar().filter(c => /Laisa SRPA/.test(c.nome));
+    out.umaLinha = casos.length === 1 && !!casos[0].ficha && !!casos[0].srpa;
+    /* SRPA antiga, gravada com caso próprio, também aparece na linha da ficha */
+    store.setList('recuperacao', [{ _id: 'srpaVelha', nome: 'Laisa SRPA Teste', data: hoje, _caseId: 'caso_outro', _finalizado: true }]);
+    const c2 = meuDia.coletar().filter(c => /Laisa SRPA/.test(c.nome));
+    out.velhaJunta = c2.length === 1 && c2[0].srpa && c2[0].srpa._id === 'srpaVelha';
+    store.setList('recuperacao', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.mesmoCaso && r.ligada && r.umaLinha && r.velhaJunta, 'SRPA no atendimento da ficha: ' + JSON.stringify(r));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
