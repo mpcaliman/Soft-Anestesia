@@ -1230,6 +1230,10 @@ const rascunhos = {
         data[el.name] = el.value;
       }
     });
+    /* e as listas (exames do ➕, exames por data, medicações, procedimentos,
+       pré-medicação, seguimento, gráfico da SRPA): sem elas o rascunho voltava
+       com as linhas na tela e o conteúdo apagado */
+    try { if (typeof fichaExtras !== 'undefined') Object.assign(data, fichaExtras.coletar(mod)); } catch (e) {}
     return data;
   },
 
@@ -1244,7 +1248,11 @@ const rascunhos = {
     const formId = rascunhos.FORMS[mod];
     const f = document.getElementById(formId);
     if (!f) return;
-    utils.clearForm(formId);
+    /* Zera como o "Novo" do módulo — listas incluídas —, não só os campos:
+       limpar só os valores deixava as linhas do rascunho anterior em branco */
+    const extras = typeof fichaExtras !== 'undefined' &&
+      ['pre', 'consulta', 'recuperacao'].indexOf(mod) >= 0;
+    if (extras) fichaExtras.zerar(mod); else utils.clearForm(formId);
     Object.keys(dados).forEach(k => {
       const val = dados[k];
       if (k.endsWith('[]') && Array.isArray(val)) {
@@ -1260,6 +1268,7 @@ const rascunhos = {
         });
       }
     });
+    if (extras) { try { fichaExtras.restaurar(mod, dados); } catch (e) { console.error('Erro ao restaurar as listas do rascunho:', e); } }
   },
 
   _limpar(mod) { rascunhos._zerar(mod); },

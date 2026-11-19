@@ -4922,7 +4922,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-19a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-19b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -17479,18 +17479,18 @@ const heranca = {
     const pseudo = { paciente: nome, _patientRef: paciente._patientRef || paciente._id || '', _patientKey: paciente._patientKey || '' };
     let ant = [];
     try { ant = agenda._anteriores(pseudo, mod); } catch (e) { ant = []; }
+    try { const atv = rascunhos.ativo(mod); ant = ant.filter(a => !(a.rasc && a.mod === mod && a.rasc === atv)); } catch (e) {}
     if (!ant.length) return;
     heranca._ant = ant; heranca._antMod = mod;
     const e = utils.escapeHTML;
     const linhas = ant.map((a, i) => {
       const destaque = a.mod === mod && a.aberto;
       const quando = a.data ? utils.formatarData(a.data) : 'sem data';
-      const estado = a.aberto ? 'em aberto (pré-lançamento)' : 'finalizada';
       const botao = destaque
         ? '<button class="btn btn-primary btn-sm" onclick="modal.close(); heranca._continuar(' + utils.jsArg(i) + ')">▶ Continuar este</button>'
         : '<button class="btn btn-sm" onclick="modal.close(); heranca._usar(' + utils.jsArg(i) + ')">📋 Usar dados</button>';
       return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border:1px solid ' + (destaque ? 'var(--primary)' : 'var(--border)') + ';border-radius:8px;margin-bottom:6px;background:' + (destaque ? 'var(--primary-soft)' : 'transparent') + '">' +
-        '<div style="font-size:.86rem">' + (destaque ? '⭐ ' : '') + '<b>' + e(agenda._ROT_MOD[a.mod] || a.mod) + '</b> — ' + e(quando) + ' · <span style="color:var(--text-mute)">' + e(estado) + '</span></div>' + botao + '</div>';
+        '<div style="font-size:.86rem">' + (destaque ? '⭐ ' : '') + '<b>' + e(agenda._ROT_MOD[a.mod] || a.mod) + '</b> — ' + e(quando) + agenda._rotuloAnterior(a) + '</div>' + botao + '</div>';
     }).join('');
     modal.open('📂 Já existem registros de ' + (nome || 'este paciente'),
       '<p style="font-size:.86rem;margin:0 0 10px"><b>Continuar</b> abre o pré-lançamento como foi deixado. <b>Usar dados</b> traz os campos equivalentes para este atendimento novo — o que vier entra em <span class="campo-herdado" style="padding:0 4px;border-radius:4px">amarelo</span> até ser revisado ou atualizado. O registro antigo não é alterado.</p>' + linhas,
@@ -17500,6 +17500,7 @@ const heranca = {
     const a = (heranca._ant || [])[Number(i)];
     if (!a) return;
     const alvo = { pre, consulta, anestesia }[a.mod];
+    if (a.rasc) { if (agenda._abrirRascunho(a.mod, a.rasc)) toast('▶ Continuando o rascunho de ' + (agenda._ROT_MOD[a.mod] || a.mod)); return; }
     try { alvo.carregar(store.getById(a.mod, a.doc._id) || a.doc); toast('▶ Continuando o pré-lançamento de ' + (agenda._ROT_MOD[a.mod] || a.mod)); }
     catch (e) { toast('Não consegui abrir o pré-lançamento', 'error'); }
   },
@@ -18692,9 +18693,10 @@ const pre = {
     toast('Pronto para salvar como novo');
   },
   limpar() {
-    if (!confirm('Limpar todos os campos?')) return;
-    utils.clearForm(pre.formId);
+    if (!confirm('Limpar todos os campos?')) return false;
+    fichaExtras.zerar('pre');   /* esvazia também as listas — sem linha em branco */
     ui.atualizarDocStatus('pre', null);
+    return true;
   },
   exportar() {
     const data = utils.formData(pre.formId);
@@ -19336,10 +19338,10 @@ const consulta = {
     markDirty();
   },
   limpar() {
-    if (!confirm('Limpar campos?')) return;
-    utils.clearForm(consulta.formId);
-    try { consulta.procs.limpar(); } catch (e) {}
+    if (!confirm('Limpar campos?')) return false;
+    fichaExtras.zerar('consulta');   /* esvazia também as listas — sem linha em branco */
     ui.atualizarDocStatus('consulta', null);
+    return true;
   },
   exportar() {
     const data = utils.formData(consulta.formId);
@@ -19786,9 +19788,10 @@ const recuperacao = {
     markDirty();
   },
   limpar() {
-    if (!confirm('Limpar campos?')) return;
-    utils.clearForm(recuperacao.formId);
+    if (!confirm('Limpar campos?')) return false;
+    fichaExtras.zerar('recuperacao');   /* gráfico e listas também */
     ui.atualizarDocStatus('recuperacao', null);
+    return true;
   },
   exportar() {
     const data = utils.formData(recuperacao.formId);
@@ -28318,6 +28321,77 @@ const labExtra = {
 };
 
 /* ============================================================================
+   A FICHA INTEIRA, NÃO SÓ OS CAMPOS COM NOME
+   ----------------------------------------------------------------------------
+   Rascunho, auto-save e "Recuperar" copiavam só os campos fixos do
+   formulário. O que mora em listas — exames do ➕, exames por data,
+   medicações, procedimentos, pré-medicação, seguimento, gráfico da SRPA —
+   ficava de fora: ao reabrir, as linhas continuavam na tela com o conteúdo
+   apagado ("Exame / Valor" em branco) e, salva assim, a ficha perdia o que
+   a secretária tinha digitado. Aqui fica, num lugar só, o que é coletado e
+   devolvido além dos campos. Anexos não entram: são grandes demais para o
+   rascunho e continuam indo com o Salvar. */
+const fichaExtras = {
+  _arr(x) { return Array.isArray(x) ? x : []; },
+  coletar(mod) {
+    const d = {};
+    const t = (k, fn) => { try { const v = fn(); if (v !== undefined && v !== null) d[k] = v; } catch (e) {} };
+    if (mod === 'pre') {
+      t('_medsLista', () => pre.meds._lista.slice());
+      t('_procsExtra', () => pre.procs.coletar());
+      t('_labExtras', () => labExtra.coletar('pre-lab-extras'));
+      t('_labSeries', () => labSerie.coletar('pre-lab-series'));
+      t('_exameSeries', () => exameSerie.coletar('pre-exame-series'));
+      t('_premedSel', () => pre.premed.coletar());
+    } else if (mod === 'consulta') {
+      t('_labExtras', () => labExtra.coletar('consulta-lab-extras'));
+      t('_seguimentos', () => consulta.seguimento.coletar());
+      t('_procsRealizados', () => consulta.procs.coletar());
+    } else if (mod === 'recuperacao') {
+      t('grafico', () => recuperacao.grafico.coletar());
+    }
+    return d;
+  },
+  /* Devolve as listas à tela. A lista que não veio é esvaziada — linha de
+     outro paciente nunca fica para trás. */
+  restaurar(mod, dados) {
+    const d = dados || {};
+    const A = fichaExtras._arr;
+    if (mod === 'pre') {
+      try { pre.meds.restaurar(d); } catch (e) {}
+      try { pre.procs.restaurar(A(d._procsExtra)); } catch (e) {}
+      try { labExtra.restaurar('pre-lab-extras', A(d._labExtras)); } catch (e) {}
+      try { labSerie.restaurar('pre-lab-series', A(d._labSeries)); } catch (e) {}
+      try { exameSerie.restaurar('pre-exame-series', A(d._exameSeries)); } catch (e) {}
+      try { pre.premed.restaurar(d._premedSel || {}); } catch (e) {}
+      try { pre.jejum.restaurar(d); } catch (e) {}
+      try { pre.labs.ligar(); pre.labs.marcar(document.getElementById(pre.formId)); } catch (e) {}
+      try { comorbidades.syncRapidas(); } catch (e) {}
+      try {
+        const w = document.getElementById('pre-risco-resumo-wrap');
+        if (w) w.style.display = (d.risco_resumo && String(d.risco_resumo).trim()) ? '' : 'none';
+      } catch (e) {}
+    } else if (mod === 'consulta') {
+      try { labExtra.restaurar('consulta-lab-extras', A(d._labExtras)); } catch (e) {}
+      try { consulta.seguimento.restaurar(A(d._seguimentos)); } catch (e) {}
+      try { consulta.procs.restaurar(A(d._procsRealizados)); } catch (e) {}
+      try { const s = document.querySelector('#' + consulta.formId + ' [name="retorno_tipo"]'); if (s) consulta._toggleRetorno(s); } catch (e) {}
+    } else if (mod === 'recuperacao') {
+      try { recuperacao.grafico.restaurar(d.grafico || {}); } catch (e) {}
+    }
+  },
+  /* Limpar de verdade: o "Novo" do módulo (que esvazia também as listas),
+     não só o valor dos campos. */
+  zerar(mod) {
+    const alvo = ({ pre: typeof pre !== 'undefined' ? pre : null,
+      consulta: typeof consulta !== 'undefined' ? consulta : null,
+      recuperacao: typeof recuperacao !== 'undefined' ? recuperacao : null })[mod];
+    if (alvo && typeof alvo._zerar === 'function') { try { alvo._zerar(); return; } catch (e) {} }
+    utils.clearForm('form-' + mod);
+  }
+};
+
+/* ============================================================================
    EXAMES EM SÉRIE — cada coleta com a SUA data
    ----------------------------------------------------------------------------
    A ficha tinha um único conjunto de exames e uma única data. Mas paciente
@@ -32225,7 +32299,7 @@ const pdfBackup = {
            que outra pessoa abriu depois, e não encerra uma nova operação. */
         if (ativo()) {
           new Set(lista.map(it => it.mod)).forEach(mod => {
-            try { utils.clearForm('form-' + mod); } catch (e) {}
+            try { fichaExtras.zerar(mod); } catch (e) {}
           });
           try { anestesia.limparSilencioso(); } catch (e) {}
           markClean();
@@ -43417,6 +43491,7 @@ function autoSaveUniversal() {
     f.querySelectorAll('input, select, textarea').forEach(el => {
       if (el.name && el.type !== 'file') data[el.name] = el.type === 'checkbox' ? el.checked : el.value;
     });
+    try { Object.assign(data, fichaExtras.coletar(mod)); } catch (e) {}   /* exames, medicações… */
     data._meta = { salvoEm: new Date().toISOString() };
     if (!store.cloudOnlyAtivo()) localStorage.setItem('medsys.v7.autosave.' + mod, JSON.stringify(data));
     else localStorage.removeItem('medsys.v7.autosave.' + mod);
@@ -43477,6 +43552,10 @@ window.recuperarAutosave = function(mod) {
             else el.value = data[k] || '';
           }
         });
+        /* as listas (exames, medicações…) voltam junto; auto-save antigo não as tinha */
+        if (Object.keys(fichaExtras.coletar(mod)).some(k => Object.prototype.hasOwnProperty.call(data, k))) {
+          fichaExtras.restaurar(mod, data);
+        }
       }
     }
     ui.fecharBanner('banner-' + mod);
@@ -45860,8 +45939,8 @@ const modelos = {
     if (!nome) return;
     let dados;
     if (modKey === 'anestesia') dados = anestesia.coletarEstruturado();
-    else if (modKey === 'pre') dados = utils.formData('form-pre');
-    else if (modKey === 'consulta') dados = utils.formData('form-consulta');
+    else if (modKey === 'pre') dados = Object.assign(utils.formData('form-pre'), fichaExtras.coletar('pre'));
+    else if (modKey === 'consulta') dados = Object.assign(utils.formData('form-consulta'), fichaExtras.coletar('consulta'));
     else { toast('Módulo não suporta modelos', 'error'); return; }
 
     /* Remove campos de identificação do paciente / datas */
@@ -45878,6 +45957,14 @@ const modelos = {
     list.unshift(modelo);
     modelos.setList(list);
     toast(`Modelo "${nome}" salvo`);
+  },
+  /* As listas que o modelo guardou (modelos antigos não guardavam nenhuma) */
+  _listasDo(modKey, dados) {
+    const out = {};
+    Object.keys(fichaExtras.coletar(modKey)).forEach(k => {
+      if (dados && Object.prototype.hasOwnProperty.call(dados, k)) out[k] = dados[k];
+    });
+    return out;
   },
   /* Remove campos de identificação do modelo (ele deve ser genérico) */
   _stripIdentificacao(modKey, dados) {
@@ -45949,8 +46036,12 @@ const modelos = {
       ['_patientKey', '_patientRef', '_caseId', '_caseKey'].forEach(k => {
         if (atual[k]) merged[k] = atual[k];
       });
+      /* listas: o que o modelo trouxer substitui; o que ele não tem fica como
+         estava na tela (antes, os exames já digitados viravam linha em branco) */
+      const listas = Object.assign(fichaExtras.coletar('pre'), modelos._listasDo('pre', m.dados));
       utils.clearForm('form-pre');
       utils.fillForm('form-pre', merged);
+      fichaExtras.restaurar('pre', Object.assign({}, merged, listas));
       ui.mostrarBanner('banner-pre', `Modelo "${m._nome}" aplicado.`, 'success');
     } else if (m._modulo === 'consulta') {
       const atual = utils.formData('form-consulta');
@@ -45959,8 +46050,10 @@ const modelos = {
       ['_patientKey', '_patientRef', '_caseId', '_caseKey'].forEach(k => {
         if (atual[k]) merged[k] = atual[k];
       });
+      const listas = Object.assign(fichaExtras.coletar('consulta'), modelos._listasDo('consulta', m.dados));
       utils.clearForm('form-consulta');
       utils.fillForm('form-consulta', merged);
+      fichaExtras.restaurar('consulta', Object.assign({}, merged, listas));
       ui.mostrarBanner('banner-consulta', `Modelo "${m._nome}" aplicado.`, 'success');
     }
     markDirty();
@@ -54753,23 +54846,101 @@ const agenda = {
   _ROT_MOD: { pre: 'Pré-anestésica', consulta: 'Consulta', anestesia: 'Ficha de anestesia', recuperacao: 'Recuperação SRPA' },
   _nomeDoc(mod, d) { return String((d && d.paciente && typeof d.paciente === 'object' ? d.paciente.nome : (d && (d.nome || d.paciente_nome || d.paciente))) || ''); },
   _dataDoc(mod, d) { return String((d && d.procedimento && typeof d.procedimento === 'object' ? d.procedimento.data : '') || (d && (d.data || d.data_anestesia)) || (d && d._createdAt) || '').slice(0, 10); },
+  /* NOME QUE NÃO BATE LETRA POR LETRA AINDA É O MESMO PACIENTE.
+     A busca comparava o nome exato: "Maria Silva" na agenda não achava a pré
+     de "Maria da Silva", nem a de um nome já corrigido no cadastro. Agora
+     valem o nome da agenda, o nome atual e os anteriores do cadastro (sem
+     acento, sem "de/da/do/dos/das/e"); e o que tem o mesmo primeiro e último
+     nome aparece como "possivelmente o mesmo paciente", para conferir. */
+  _normNomeAg(s) {
+    return utils.semAcento(s || '').replace(/[^a-z0-9 ]/g, ' ')
+      .replace(/\b(de|da|do|das|dos|e)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  },
+  _nomesDoPaciente(ag) {
+    const N = agenda._normNomeAg;
+    const nomes = new Set();
+    const base = N(ag.paciente || '');
+    if (base) nomes.add(base);
+    try {
+      (pacientes.list() || []).forEach(p => {
+        if (!p) return;
+        const todos = pacientes.todosOsNomes(p);
+        const mesmo = (ag._patientRef && p._patientRef && p._patientRef === ag._patientRef) ||
+          (ag._patientKey && p._patientKey && p._patientKey === ag._patientKey) ||
+          (base && todos.some(n => N(n) === base));
+        if (mesmo) todos.forEach(n => { const x = N(n); if (x) nomes.add(x); });
+      });
+    } catch (e) {}
+    return nomes;
+  },
+  _parecido(a, b) {
+    const ta = String(a || '').split(' '), tb = String(b || '').split(' ');
+    return ta.length >= 2 && tb.length >= 2 && ta[0] === tb[0] && ta[ta.length - 1] === tb[tb.length - 1];
+  },
   _anteriores(ag, destino) {
-    const nomeAg = utils.semAcento(ag.paciente || '');
-    if (!nomeAg) return [];
+    const nomes = agenda._nomesDoPaciente(ag);
+    if (!nomes.size && !ag._patientRef && !ag._patientKey) return [];
+    const N = agenda._normNomeAg;
+    const casar = (mod, d) => {
+      const mesmaRef = ag._patientRef && d._patientRef && ag._patientRef === d._patientRef;
+      const mesmaChave = ag._patientKey && d._patientKey && ag._patientKey === d._patientKey;
+      if (mesmaRef || mesmaChave) return 'certo';
+      const nd = N(agenda._nomeDoc(mod, d));
+      if (!nd) return '';
+      if (nomes.has(nd)) return 'certo';
+      for (const n of nomes) if (agenda._parecido(n, nd)) return 'parecido';
+      return '';
+    };
     const out = [];
     ['pre', 'consulta', 'anestesia', 'recuperacao'].forEach(mod => {
       (store.list(mod) || []).forEach(d => {
         if (!d || !d._id) return;
         if (d._relOrg && typeof cloudRel !== 'undefined' && cloudRel._org && d._relOrg !== cloudRel._org()) return;
-        const mesmaRef = ag._patientRef && d._patientRef && ag._patientRef === d._patientRef;
-        const mesmaChave = ag._patientKey && d._patientKey && ag._patientKey === d._patientKey;
-        if (!mesmaRef && !mesmaChave && utils.semAcento(agenda._nomeDoc(mod, d)) !== nomeAg) return;
-        out.push({ mod, doc: d, data: agenda._dataDoc(mod, d), aberto: !d._finalizado });
+        const como = casar(mod, d);
+        if (!como) return;
+        out.push({ mod, doc: d, data: agenda._dataDoc(mod, d), aberto: !d._finalizado, como });
       });
+      /* o que ficou só em RASCUNHO (digitado e não salvo) também é do paciente */
+      try {
+        (rascunhos.list(mod) || []).forEach(r => {
+          if (!r || !r.id || !r.dados || r._draftConflictOf) return;
+          const d = r.dados;
+          const nome = rascunhos._extrairNomePaciente(mod, d);
+          if (!nome) return;
+          const como = casar(mod, mod === 'anestesia'
+            ? { paciente: { nome }, _patientRef: d._patientRef, _patientKey: d._patientKey }
+            : Object.assign({}, d, { nome }));
+          if (!como) return;
+          out.push({ mod, doc: d, rasc: r.id, data: agenda._dataDoc(mod, d) || String(r.updatedAt || '').slice(0, 10), aberto: true, como });
+        });
+      } catch (e) {}
     });
-    /* o pré-lançamento do mesmo tipo vem primeiro; depois do mais recente */
-    out.sort((a, b) => ((b.mod === destino && b.aberto) - (a.mod === destino && a.aberto)) || String(b.data).localeCompare(String(a.data)));
-    return out.slice(0, 8);
+    /* o pré-lançamento do mesmo tipo vem primeiro; o nome exato antes do
+       parecido; depois do mais recente */
+    out.sort((a, b) => ((b.mod === destino && b.aberto) - (a.mod === destino && a.aberto)) ||
+      ((a.como === 'parecido') - (b.como === 'parecido')) || String(b.data).localeCompare(String(a.data)));
+    return out.slice(0, 10);
+  },
+  /* estado e aviso de cada linha da janela "já existem registros" */
+  _rotuloAnterior(a) {
+    const e = utils.escapeHTML;
+    const estado = a.rasc ? 'rascunho não salvo' : (a.aberto ? 'em aberto (pré-lançamento)' : 'finalizada');
+    let html = ' · <span style="color:var(--text-mute)">' + e(estado) + '</span>';
+    if (a.como === 'parecido') {
+      const nome = a.rasc ? rascunhos._extrairNomePaciente(a.mod, a.doc) : agenda._nomeDoc(a.mod, a.doc);
+      html += '<br><span style="color:var(--warning,#b45309)">⚠ possivelmente o mesmo paciente — no registro: <b>' +
+        e(nome || '') + '</b>. Confira antes de usar.</span>';
+    }
+    return html;
+  },
+  /* abre o rascunho da lista na aba dele */
+  _abrirRascunho(mod, id) {
+    const r = (rascunhos.list(mod) || []).find(x => x.id === id);
+    if (!r || !r.dados) { toast('Esse rascunho não está mais neste aparelho', 'warn'); return false; }
+    if (rascunhos.ativo(mod) === r.id) rascunhos._restaurar(mod, r.dados);
+    else rascunhos.ativar(mod, r.id);
+    try { rascunhos.renderAbas(mod); } catch (e) {}
+    return true;
   },
   _definirModalidade(id, modalidade) {
     const ag = store.getById('agenda', id);
@@ -54790,12 +54961,11 @@ const agenda = {
     const linhas = ant.map((a, i) => {
       const destaque = a.mod === destino && a.aberto;
       const quando = a.data ? utils.formatarData(a.data) : 'sem data';
-      const estado = a.aberto ? 'em aberto (pré-lançamento)' : 'finalizada';
       const botao = destaque
         ? '<button class="btn btn-primary btn-sm" onclick="modal.close(); agenda._continuar(' + utils.jsArg(idAgenda) + ',' + utils.jsArg(i) + ')">▶ Continuar este</button>'
         : '<button class="btn btn-sm" onclick="modal.close(); agenda._usarFonte(' + utils.jsArg(idAgenda) + ',' + utils.jsArg(destino) + ',' + utils.jsArg(i) + ')">📋 Usar como fonte</button>';
       return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border:1px solid ' + (destaque ? 'var(--primary)' : 'var(--border)') + ';border-radius:8px;margin-bottom:6px;background:' + (destaque ? 'var(--primary-soft)' : 'transparent') + '">' +
-        '<div style="font-size:.86rem">' + (destaque ? '⭐ ' : '') + '<b>' + e(agenda._ROT_MOD[a.mod] || a.mod) + '</b> — ' + e(quando) + ' · <span style="color:var(--text-mute)">' + e(estado) + '</span></div>' + botao + '</div>';
+        '<div style="font-size:.86rem">' + (destaque ? '⭐ ' : '') + '<b>' + e(agenda._ROT_MOD[a.mod] || a.mod) + '</b> — ' + e(quando) + agenda._rotuloAnterior(a) + '</div>' + botao + '</div>';
     }).join('');
     modal.open('⚠️ Já existem registros de ' + (ag.paciente || 'este paciente'),
       '<p style="font-size:.86rem;margin:0 0 10px">Antes de começar, veja o que já existe deste paciente. <b>Continuar</b> abre o pré-lançamento como foi deixado; <b>Usar como fonte</b> começa um atendimento novo já com os campos equivalentes (cadastro, comorbidades, alergias, medicações, exames) — o registro antigo não é alterado.</p>' + linhas,
@@ -54811,8 +54981,11 @@ const agenda = {
     const mod = a.mod;
     ui.irEEntao(mod, '#form-' + mod, () => {
       try {
-        const alvo = { pre, consulta, anestesia, recuperacao }[mod];
-        alvo.carregar(store.getById(mod, a.doc._id) || a.doc);
+        if (a.rasc) { if (!agenda._abrirRascunho(mod, a.rasc)) return; }
+        else {
+          const alvo = { pre, consulta, anestesia, recuperacao }[mod];
+          alvo.carregar(store.getById(mod, a.doc._id) || a.doc);
+        }
         const f = document.getElementById('form-' + mod);
         const se = (n, v) => { const el = f && f.querySelector('[name="' + n + '"]'); if (el && !el.value && v) { try { linker._setCampo(el, v); } catch (x) { el.value = v; } } };
         if (mod === 'anestesia') { se('paciente_convenio', ag.convenio); se('cirurgiao', ag.cirurgiao); se('procedimento', ag.procedimento); se('local_hospital', ag.local); se('data_anestesia', ag.data); }
@@ -54920,7 +55093,10 @@ const agenda = {
             }
           }
         } else if (destino === 'pre') {
-          if (typeof pre.limpar === 'function') pre.limpar();
+          /* "Cancelar" no Limpar mantém a ficha que estava aberta — e então o
+             atendimento não começa por cima dela (antes, o paciente da agenda
+             era escrito sobre os dados do anterior) */
+          if (typeof pre.limpar === 'function' && pre.limpar() === false) { toast('Atendimento não iniciado: a ficha aberta foi mantida', 'warn'); return; }
           const f = document.getElementById('form-pre');
           if (f) {
             linker.aplicarContextoPaciente('pre', ag, contextoPaciente);
@@ -54935,7 +55111,10 @@ const agenda = {
             setTimeout(() => linker.autoPreencherDadosPaciente(ag.paciente, 'pre', contextoPaciente), 100);
           }
         } else if (destino === 'consulta') {
-          if (typeof consulta.limpar === 'function') consulta.limpar();
+          /* "Cancelar" no Limpar mantém a ficha que estava aberta — e então o
+             atendimento não começa por cima dela (antes, o paciente da agenda
+             era escrito sobre os dados do anterior) */
+          if (typeof consulta.limpar === 'function' && consulta.limpar() === false) { toast('Atendimento não iniciado: a ficha aberta foi mantida', 'warn'); return; }
           const f = document.getElementById('form-consulta');
           if (f) {
             linker.aplicarContextoPaciente('consulta', ag, contextoPaciente);
@@ -54952,7 +55131,10 @@ const agenda = {
             setTimeout(() => linker.autoPreencherDadosPaciente(ag.paciente, 'consulta', contextoPaciente), 100);
           }
         } else if (destino === 'recuperacao') {
-          if (typeof recuperacao.limpar === 'function') recuperacao.limpar();
+          /* "Cancelar" no Limpar mantém a ficha que estava aberta — e então o
+             atendimento não começa por cima dela (antes, o paciente da agenda
+             era escrito sobre os dados do anterior) */
+          if (typeof recuperacao.limpar === 'function' && recuperacao.limpar() === false) { toast('Atendimento não iniciado: a ficha aberta foi mantida', 'warn'); return; }
           const f = document.getElementById('form-recuperacao');
           if (f) {
             linker.aplicarContextoPaciente('recuperacao', ag, contextoPaciente);
