@@ -26292,6 +26292,60 @@ await test('Conciliação pelo XML TISS da Unimed (também dentro de .webarchive
   await page.close();
 });
 
+await test('Rascunho/auto-save guardam a ficha inteira (exames do ➕, medicações…) e não deixam linha em branco; Atender acha rascunho e nome parecido', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const espera = ms => new Promise(res => setTimeout(res, ms));
+    const out = {};
+    window.confirm = () => true;
+    ui.navegar('pre'); await espera(250);
+    const linhas = () => Array.from(document.querySelectorAll('#pre-lab-extras .lab-extra'))
+      .map(x => x.querySelector('.lab-extra-label').value + '=' + x.querySelector('.lab-extra-val').value);
+    rascunhos.novo('pre', { silencioso: true });
+    const idA = rascunhos.ativo('pre');
+    document.querySelector('#form-pre [name="nome"]').value = 'Paciente Rascunho Sintético';
+    labExtra.add('pre-lab-extras', 'Hb', '13,2', { silencioso: true });
+    labExtra.add('pre-lab-extras', 'PCR', '0,4', { silencioso: true });
+    try { pre.meds._lista = [{ nome: 'Losartana sintética' }]; pre.meds.render(); } catch (e) {}
+    const col = rascunhos._coletar('pre');
+    out.coleta = Array.isArray(col._labExtras) && col._labExtras.length === 2 && Array.isArray(col._medsLista) && col._medsLista.length === 1;
+    rascunhos.salvarAtual('pre');
+    /* outro rascunho: a tela fica sem as linhas do anterior (antes: linhas vazias) */
+    rascunhos.novo('pre', { silencioso: true });
+    out.semLinhaVazia = linhas().length === 0;
+    /* volta ao primeiro: os exames voltam com o conteúdo */
+    rascunhos.ativar('pre', idA);
+    out.voltou = JSON.stringify(linhas()) === JSON.stringify(['Hb=13,2', 'PCR=0,4']) &&
+      (pre.meds._lista || []).length === 1;
+    /* auto-save leva as listas junto */
+    state.autosaveEnabled = true; state.dirty = true; state.currentModule = 'pre';
+    autoSaveUniversal();
+    let auto = {};
+    try { auto = JSON.parse(localStorage.getItem('medsys.v7.autosave.pre') || '{}'); } catch (e) {}
+    out.autosave = store.cloudOnlyAtivo() || (Array.isArray(auto._labExtras) && auto._labExtras.length === 2);
+    /* Limpar esvazia as linhas */
+    pre.limpar();
+    out.limpou = linhas().length === 0;
+    /* Atender: acha o rascunho e o nome parecido (com "da" no meio) */
+    const ag = store.save('agenda', { tipo: 'consulta', modalidade: 'pre', paciente: 'Paciente Rascunho Sintético', data: utils.hojeISO() });
+    store.save('pre', { nome: 'Joana Teste Sintética', data: '2026-01-05' });
+    store.save('pre', { nome: 'Joana da Teste Sintética', data: '2026-01-06' });
+    store.save('pre', { nome: 'Joana Outra Sintética', data: '2026-01-07' });
+    const ag2 = store.save('agenda', { tipo: 'consulta', modalidade: 'pre', paciente: 'Joana Teste Sintética', data: utils.hojeISO() });
+    const a1 = agenda._anteriores(store.getById('agenda', ag._id), 'pre');
+    out.achouRascunho = a1.some(a => a.rasc === idA && a.como === 'certo');
+    const a2 = agenda._anteriores(store.getById('agenda', ag2._id), 'pre');
+    out.certos = a2.filter(a => a.como === 'certo').length === 2;
+    out.parecido = a2.some(a => a.como === 'parecido' && /Outra/.test(a.doc.nome)) &&
+      /possivelmente o mesmo paciente/.test(agenda._rotuloAnterior(a2.find(a => a.como === 'parecido')));
+    out.parecidoDepois = a2[a2.length - 1].como === 'parecido';
+    return out;
+  });
+  assert(r.coleta && r.semLinhaVazia && r.voltou && r.autosave && r.limpou, 'rascunho/auto-save com exames e medicações, sem linha em branco: ' + JSON.stringify(r));
+  assert(r.achouRascunho && r.certos && r.parecido && r.parecidoDepois, 'Atender acha rascunho, nome com "da" e marca o parecido: ' + JSON.stringify(r));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
