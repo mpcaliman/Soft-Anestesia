@@ -4922,7 +4922,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-18c</b><br>
+    v7.1 · build <b id="build-tag">2026-11-19a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -51694,7 +51694,7 @@ const financeiro = {
         ['valor_recebido', 'Recebido', 'Valores', 'm', 18, x => financeiro.valores(x).rec],
         ['glosa', 'Glosa', 'Valores', 'm', 16, x => n(x.glosa)],
         ['a_receber', 'A receber', 'Valores', 'm', 18, x => financeiro.valores(x).aReceber],
-        ['motivo_glosa', 'Motivo da glosa', 'Valores', 't', 34, x => R._imp(x).motivosGlosa || R._codigos(x).map(c => c.obs || c.observacao).filter(Boolean).join(' | ') || ''],
+        ['motivo_glosa', 'Motivo da glosa', 'Valores', 't', 34, x => x.motivo_glosa || R._imp(x).motivosGlosa || R._codigos(x).map(c => c.obs || c.observacao).filter(Boolean).join(' | ') || ''],
         ['status', 'Status', 'Valores', 't', 16, x => x.status || ''],
         ['pago', 'Pago', 'Valores', 't', 9, x => (financeiro.ehQuitado(x.status) || x.pago === true) ? 'Sim' : 'Não'],
         ['data_pagamento', 'Data do pagamento', 'Valores', 'd', 16, x => x.data_pagamento || x.data_recebimento || ''],
