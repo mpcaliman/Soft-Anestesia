@@ -26231,6 +26231,67 @@ await test('Financeiro: editar não encolhe a lista, código principal aparece n
   await page.close();
 });
 
+await test('Conciliação pelo XML TISS da Unimed (também dentro de .webarchive): casa por senha/carteirinha, mostra glosa e motivo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const xml = '<?xml version="1.0" encoding="ISO-8859-1"?><ans:mensagemTISS xmlns:ans="http://www.ans.gov.br/padroes/tiss/schemas">' +
+      '<ans:operadoraParaPrestador><ans:demonstrativosRetorno><ans:demonstrativoAnaliseConta>' +
+      '<ans:cabecalhoDemonstrativo><ans:nomeOperadora>UNIMED TESTE</ans:nomeOperadora><ans:dataEmissao>2026-10-26</ans:dataEmissao></ans:cabecalhoDemonstrativo>' +
+      '<ans:dadosConta><ans:dadosProtocolo>' +
+      '<ans:relacaoGuias><ans:numeroGuiaOperadora>7000001</ans:numeroGuiaOperadora><ans:senha>9990001</ans:senha><ans:numeroCarteira>1111222233334444</ans:numeroCarteira>' +
+      '<ans:dataInicioFat>2026-08-04</ans:dataInicioFat><ans:horaInicioFat>14:13:00</ans:horaInicioFat><ans:situacaoGuia>1</ans:situacaoGuia>' +
+      '<ans:detalhesGuia><ans:dataRealizacao>2026-08-04</ans:dataRealizacao><ans:procedimento><ans:codigoProcedimento>31206247</ans:codigoProcedimento><ans:descricaoProcedimento>Reconstrução teste</ans:descricaoProcedimento></ans:procedimento>' +
+      '<ans:valorInformado>700.00</ans:valorInformado><ans:qtdExecutada>0.02</ans:qtdExecutada><ans:valorProcessado>13.38</ans:valorProcessado><ans:valorLiberado>13.38</ans:valorLiberado></ans:detalhesGuia>' +
+      '<ans:detalhesGuia><ans:dataRealizacao>2026-08-04</ans:dataRealizacao><ans:procedimento><ans:codigoProcedimento>31206247</ans:codigoProcedimento><ans:descricaoProcedimento>Reconstrução teste</ans:descricaoProcedimento></ans:procedimento>' +
+      '<ans:valorInformado>0</ans:valorInformado><ans:qtdExecutada>0.98</ans:qtdExecutada><ans:valorProcessado>702.42</ans:valorProcessado><ans:valorLiberado>702.42</ans:valorLiberado></ans:detalhesGuia>' +
+      '</ans:relacaoGuias>' +
+      '<ans:relacaoGuias><ans:numeroGuiaOperadora>7000002</ans:numeroGuiaOperadora><ans:senha>9990002</ans:senha><ans:numeroCarteira>5555666677778888</ans:numeroCarteira>' +
+      '<ans:dataInicioFat>2026-09-08</ans:dataInicioFat><ans:horaInicioFat>10:30:00</ans:horaInicioFat>' +
+      '<ans:motivoGlosaGuia><ans:codigoGlosa>2516</ans:codigoGlosa><ans:descricaoGlosa>QUANTIDADE COBRADA DIFERENTE</ans:descricaoGlosa></ans:motivoGlosaGuia>' +
+      '<ans:detalhesGuia><ans:dataRealizacao>2026-09-08</ans:dataRealizacao><ans:procedimento><ans:codigoProcedimento>30904021</ans:codigoProcedimento><ans:descricaoProcedimento>Proc glosado</ans:descricaoProcedimento></ans:procedimento>' +
+      '<ans:valorInformado>0</ans:valorInformado><ans:qtdExecutada>2.00</ans:qtdExecutada><ans:valorProcessado>434.08</ans:valorProcessado><ans:valorLiberado>0.00</ans:valorLiberado>' +
+      '<ans:relacaoGlosa><ans:valorGlosa>434.08</ans:valorGlosa><ans:tipoGlosa>2516</ans:tipoGlosa></ans:relacaoGlosa></ans:detalhesGuia></ans:relacaoGuias>' +
+      '</ans:dadosProtocolo><ans:valorLiberadoGeral>715.80</ans:valorLiberadoGeral></ans:dadosConta>' +
+      '</ans:demonstrativoAnaliseConta></ans:demonstrativosRetorno></ans:operadoraParaPrestador></ans:mensagemTISS>';
+    /* embrulhado como o .webarchive do Safari: bytes antes e depois */
+    const enc = new TextEncoder();
+    const lixo = enc.encode('bplist00\u0001\u0002WebMainResource');
+    const corpo = enc.encode(xml);
+    const fim = enc.encode('\u0000_WebResourceURL');
+    const bytes = new Uint8Array(lixo.length + corpo.length + fim.length);
+    bytes.set(lixo, 0); bytes.set(corpo, lixo.length); bytes.set(fim, lixo.length + corpo.length);
+    const x = extratoConc.xmlDosBytes(bytes);
+    out.extraiu = extratoConc._ehTiss(x) && /Reconstrução/.test(x);
+    store.setList('pacientes', [{ _id: 'pc', nome: 'Cicrano Carteira Teste', carteirinha: '1111 2222 3333 4444' }]);
+    const ext = extratoConc.parseTiss(x);
+    const a = ext.linhas.find(l => l.codigo === '31206247'), g = ext.linhas.find(l => l.codigo === '30904021');
+    out.somou = ext.linhas.length === 2 && a.pago === 715.8 && a.hora === '14:13' && a.guia === '7000001';
+    out.nome = a.paciente === 'Cicrano Carteira Teste' && /^Carteira 5555/.test(g.paciente);
+    out.glosa = g.pago === 0 && g.glosa === 434.08 && /2516 QUANTIDADE/.test(g.motivoGlosa) && !/código 2516/.test(g.motivoGlosa) && ext.glosas.length === 1;
+    /* casamento por senha, mesmo com nome diferente; e por carteirinha */
+    store.setList('financeiro', [
+      { _id: 'fa', paciente: 'Nome Escrito Diferente', data_proc: '2026-08-04', senha: '9990001', cbhpm_codigo: '31206247', valor_previsto: 715.8, status: 'pendente' },
+      { _id: 'fg', paciente: 'Outro Nome', carteirinha: '5555666677778888', data_proc: '2026-09-08', cbhpm_codigo: '30904021', valor_previsto: 434.08, status: 'pendente' }
+    ]);
+    const res = extratoConc.conciliar(ext);
+    out.casouSenha = res.confere.some(i => i.fin._id === 'fa');
+    out.casouCarteira = res.diferenca.some(i => i.fin._id === 'fg');
+    extratoConc.revisar(ext);
+    out.telaMotivo = /QUANTIDADE COBRADA DIFERENTE/.test(document.getElementById('modal-body').textContent);
+    const ap = extratoConc.aplicar();
+    const fg = store.getById('financeiro', 'fg'), fa = store.getById('financeiro', 'fa');
+    out.aplicou = fa.status === 'recebido' && fg.status === 'glosado' && fg.glosa === 434.08 && /2516/.test(fg.motivo_glosa) && fg.guia_operadora === '7000002';
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []); store.setList('pacientes', []);
+    orcamento.salvarCfg({ valoresPagos: {}, valoresPagosDuvidas: [] });
+    return out;
+  });
+  assert(r.extraiu && r.somou && r.nome && r.glosa, 'XML TISS lido (dentro do .webarchive), partidos somados, nome pela carteirinha, glosa com motivo: ' + JSON.stringify(r));
+  assert(r.casouSenha && r.casouCarteira && r.telaMotivo && r.aplicou, 'casa por senha/carteirinha e grava glosa, motivo e guia: ' + JSON.stringify(r));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

@@ -252,6 +252,95 @@ const extratoConc = {
     return { fonte: 'Unimed', competencia, dataPagamento, linhas, glosas };
   },
 
+  /* ------------------------------------------------- XML TISS (ANS 4.x) */
+  /* O arquivo pode vir puro (.xml) ou embrulhado pelo Safari (.webarchive):
+     nos dois casos o XML está inteiro dentro dos bytes. */
+  xmlDosBytes(bytes) {
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const achar = (agulha, de) => {
+      const a = new TextEncoder().encode(agulha);
+      outer: for (let i = de || 0; i <= u8.length - a.length; i++) {
+        for (let j = 0; j < a.length; j++) if (u8[i + j] !== a[j]) continue outer;
+        return i;
+      }
+      return -1;
+    };
+    let ini = achar('<?xml');
+    if (ini < 0) ini = achar('<ans:mensagemTISS');
+    if (ini < 0) return '';
+    const fimTag = '</ans:mensagemTISS>';
+    const fim = achar(fimTag, ini);
+    const pedaco = u8.subarray(ini, fim < 0 ? u8.length : fim + fimTag.length);
+    /* a Unimed declara ISO-8859-1 mas grava em UTF-8: tenta UTF-8 primeiro */
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(pedaco); }
+    catch (e) { return new TextDecoder('iso-8859-1').decode(pedaco); }
+  },
+  _ehTiss(texto) { return /<ans:mensagemTISS|padroes\/tiss/.test(String(texto || '').slice(0, 4000)); },
+  /* nome do paciente: o XML só traz a carteirinha — o nome vem do Soft */
+  _nomePorCarteira(cart) {
+    const d = String(cart || '').replace(/\D/g, '');
+    if (!d) return '';
+    const igual = x => String((x && (x.carteirinha || x.paciente_carteirinha)) || '').replace(/\D/g, '') === d;
+    try {
+      const p = (store.list('pacientes') || []).find(igual);
+      if (p && p.nome) return p.nome;
+      const f = (store.list('financeiro') || []).find(igual);
+      if (f && f.paciente) return f.paciente;
+    } catch (e) {}
+    return '';
+  },
+  parseTiss(texto) {
+    const NS = 'http://www.ans.gov.br/padroes/tiss/schemas';
+    const doc = new DOMParser().parseFromString(texto, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw new Error('XML inválido');
+    const todos = (el, nome) => Array.from(el.getElementsByTagNameNS(NS, nome));
+    const um = (el, nome) => { const x = el.getElementsByTagNameNS(NS, nome)[0]; return x ? String(x.textContent || '').trim() : ''; };
+    const filho = (el, nome) => Array.from(el.children).filter(c => c.localName === nome);
+    const num = v => { const n = parseFloat(String(v || '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+    const operadora = um(doc, 'nomeOperadora') || 'Unimed';
+    const emissao = um(doc, 'dataEmissao');
+    const linhas = [], glosas = [];
+    todos(doc, 'relacaoGuias').forEach(g => {
+      const v = n => { const x = filho(g, n)[0]; return x ? String(x.textContent || '').trim() : ''; };
+      const carteira = v('numeroCarteira'), guia = v('numeroGuiaOperadora'), senha = v('senha');
+      const motivosGuia = filho(g, 'motivoGlosaGuia').map(m => [um(m, 'codigoGlosa'), um(m, 'descricaoGlosa')].filter(Boolean).join(' '));
+      const nome = extratoConc._nomePorCarteira(carteira);
+      const paciente = nome || ('Carteira ' + carteira);
+      /* itens do mesmo código e data na guia: soma (partido 0,02 + 0,98) */
+      const grupos = new Map();
+      filho(g, 'detalhesGuia').forEach(d => {
+        const cod = um(d, 'codigoProcedimento'), data = um(d, 'dataRealizacao') || v('dataInicioFat');
+        const k = cod + '|' + data;
+        const glosaItem = todos(d, 'relacaoGlosa').reduce((t, r) => t + num(um(r, 'valorGlosa')), 0);
+        const tipos = todos(d, 'relacaoGlosa').map(r => um(r, 'tipoGlosa')).filter(Boolean);
+        if (!grupos.has(k)) grupos.set(k, { codigo: cod, data, descricao: um(d, 'descricaoProcedimento'), qtd: 0, informado: 0, processado: 0, liberado: 0, glosa: 0, tipos: [] });
+        const x = grupos.get(k);
+        x.qtd += num(um(d, 'qtdExecutada')); x.informado += num(um(d, 'valorInformado'));
+        x.processado += num(um(d, 'valorProcessado')); x.liberado += num(um(d, 'valorLiberado'));
+        x.glosa += glosaItem; x.tipos = x.tipos.concat(tipos);
+      });
+      grupos.forEach(x => {
+        const r2 = n => Math.round(n * 100) / 100;
+        const glosa = r2(x.glosa || Math.max(0, x.processado - x.liberado));
+        /* o código que já veio no motivo da guia não se repete */
+        const tiposSoltos = Array.from(new Set(x.tipos)).filter(t => !motivosGuia.some(m => m.indexOf(t) === 0));
+        const motivo = motivosGuia.concat(tiposSoltos.map(t => 'código ' + t)).filter(Boolean).join('; ');
+        const unidades = x.qtd >= 1.5 ? Math.round(x.qtd) : 1;
+        linhas.push({
+          fonte: 'Unimed', convenio: operadora, tipo: 'Guia ' + guia, ref: 'Guia ' + guia + (senha ? ' · senha ' + senha : ''),
+          paciente, carteira, guia, senha, hospital: '', data: x.data, hora: v('horaInicioFat').slice(0, 5),
+          codigo: x.codigo, descricao: x.descricao, porteAn: '', via: '', pct: 100, unidades,
+          cobrado: r2(x.informado), processado: r2(x.processado), glosa, motivoGlosa: motivo, pago: r2(x.liberado),
+          valorCheio: null, base: (unidades > 1 ? unidades + ' unid. · ' : '') + 'faturado R$ ' + r2(x.informado).toFixed(2).replace('.', ',') +
+            ' · liberado R$ ' + r2(x.liberado).toFixed(2).replace('.', ',')
+        });
+        if (glosa > 0.005) glosas.push({ evento: guia, data: x.data, paciente, motivo: motivo || 'glosa sem motivo informado', situacao: 'R$ ' + glosa.toFixed(2).replace('.', ',') });
+      });
+    });
+    return { fonte: 'Unimed (XML TISS)', competencia: (emissao || '').slice(0, 7), dataPagamento: '', linhas, glosas,
+      totalLiberado: num(um(doc, 'valorLiberadoGeral')) };
+  },
+
   /* ----------------------------------------------------------- casamento */
   _tokens(s) { return extratoConc._norm(s).split(' ').filter(w => w.length >= 3 && ['dos', 'das', 'de', 'da', 'do'].indexOf(w) < 0); },
   /* nomes truncados pela operadora ("OLIVEIRA SANTO"): prefixo vale */
@@ -286,10 +375,16 @@ const extratoConc = {
       fins.forEach(f => {
         const dd = extratoConc._diaDif(String(f.data_proc || '').slice(0, 10), l.data);
         if (dd > 1) return;
-        const sim = extratoConc._semelhanca(l.paciente, f.paciente);
-        if (sim < 0.6) return;
+        const dig = v => String(v || '').replace(/\D/g, '');
+        /* senha / nº da guia identificam o atendimento sem depender do nome */
+        const alvos = [dig(l.senha), dig(l.guia)].filter(Boolean);
+        const mesmaSenha = alvos.length > 0 && [f.senha, f.senha_nova, f.guia_operadora].some(x => dig(x) && alvos.indexOf(dig(x)) >= 0);
+        const mesmaCarteira = !!l.carteira && !!dig(f.carteirinha) && dig(f.carteirinha) === dig(l.carteira);
+        let sim = extratoConc._semelhanca(l.paciente, f.paciente);
+        if (mesmaCarteira) sim = Math.max(sim, 1);
+        if (sim < 0.6 && !mesmaSenha) return;
         const cods = extratoConc._codigosDe(f);
-        let n = sim + (dd === 0 ? 0.3 : 0) + (cods.has(l.codigo) ? 0.6 : (cods.size ? -0.2 : 0));
+        let n = sim + (mesmaSenha ? 1.5 : 0) + (dd === 0 ? 0.3 : 0) + (cods.has(l.codigo) ? 0.6 : (cods.size ? -0.2 : 0));
         if (n > nota) { nota = n; melhor = f; }
       });
       if (!melhor || nota < 0.95) { resultado.semLancamento.push({ linha: l }); return; }
@@ -590,9 +685,9 @@ const extratoConc = {
   abrir() {
     const e = utils.escapeHTML;
     modal.open('📑 Conciliar extrato (PDF)',
-      '<p style="font-size:.86rem;line-height:1.6;margin:0 0 10px">Escolha o PDF de pagamento da <b>Coopanest</b> (Movimento Detalhado por Cooperado) ou da <b>Unimed</b> (Espelho de Pagamento Prestador). ' +
+      '<p style="font-size:.86rem;line-height:1.6;margin:0 0 10px">Escolha o arquivo de pagamento: PDF da <b>Coopanest</b> (Movimento Detalhado por Cooperado), PDF da <b>Unimed</b> (Espelho de Pagamento Prestador) ou o <b>XML TISS</b> da Unimed (Demonstrativo de Análise de Conta — também vale o .webarchive salvo pelo Safari). ' +
       'O arquivo é lido <b>neste aparelho</b> — não é enviado para lugar nenhum. Nada é gravado antes de você conferir e tocar em <b>Aplicar</b>.</p>' +
-      '<input type="file" id="extrato-pdf" accept="application/pdf,.pdf">' +
+      '<input type="file" id="extrato-pdf" accept="application/pdf,.pdf,.xml,application/xml,text/xml,.webarchive">' +
       '<div id="extrato-status" style="font-size:.84rem;margin-top:10px;color:var(--text-mute)"></div>',
       '<button class="btn" onclick="modal.close()">Fechar</button>');
     const inp = document.getElementById('extrato-pdf');
@@ -603,6 +698,18 @@ const extratoConc = {
     const st = document.getElementById('extrato-status');
     const diz = t => { if (st) st.textContent = t; };
     try {
+      const bytes = new Uint8Array(await arquivo.arrayBuffer());
+      const ehPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;   /* %PDF */
+      if (!ehPdf) {
+        diz('⏳ Lendo o XML…');
+        const xml = extratoConc.xmlDosBytes(bytes);
+        if (!xml || !extratoConc._ehTiss(xml)) { diz('Não reconheci este arquivo. Aceitos: PDF da Coopanest/Unimed e XML TISS da Unimed.'); return; }
+        const ext = extratoConc.parseTiss(xml);
+        ext.arquivo = arquivo.name || '';
+        if (!ext.linhas.length) { diz('Li o XML, mas não encontrei guias.'); return; }
+        extratoConc.revisar(ext);
+        return;
+      }
       diz('⏳ Lendo o PDF…');
       const paginas = await extratoConc.paginasDoArquivo(arquivo);
       const tipo = extratoConc.detectar(paginas);
@@ -623,7 +730,8 @@ const extratoConc = {
     const E = utils.escapeHTML, F = extratoConc._fmt;
     const total = ext.linhas.reduce((s, l) => s + (l.pago || 0), 0);
     const cab = (t, n, cor) => '<h3 style="font-size:.95rem;margin:14px 0 6px;color:' + cor + '">' + t + ' <small style="font-weight:400;color:var(--text-mute)">(' + n + ')</small></h3>';
-    const linhasTxt = ls => ls.map(l => E(l.codigo) + ' ' + E((l.descricao || '').slice(0, 40)) + ' · ' + E(l.base || '') + ' · R$ ' + F(l.pago)).join('<br>');
+    const linhasTxt = ls => ls.map(l => E(l.codigo) + ' ' + E((l.descricao || '').slice(0, 40)) + ' · ' + E(l.base || '') + ' · R$ ' + F(l.pago) +
+      (l.glosa > 0.005 ? '<br><small style="color:#a33">glosa R$ ' + F(l.glosa) + (l.motivoGlosa ? ' — ' + E(l.motivoGlosa) : '') + '</small>' : '')).join('<br>');
     const tab = (lista, comCheck, chkPadrao) => '<table class="fase4-tab" style="width:100%;font-size:.8rem"><thead><tr>' + (comCheck ? '<th></th>' : '') +
       '<th>Paciente</th><th>Data</th><th>Extrato</th><th>Previsto</th><th>Pago</th><th>Dif.</th></tr></thead><tbody>' +
       lista.map((it, i) => '<tr>' + (comCheck ? '<td><input type="checkbox" class="extrato-aplicar" data-i="' + i + '" data-g="' + comCheck + '"' + (chkPadrao ? ' checked' : '') + '></td>' : '') +
@@ -673,8 +781,12 @@ const extratoConc = {
       f.valor_recebido = recebido; f.valor_pago = recebido;
       f.data_pagamento = data; f.data_recebimento = data;
       if (it.glosa > 0) f.glosa = Math.round(((Number(f.glosa) || 0) + it.glosa) * 100) / 100;
+      const motivos = it.linhas.map(l => l.motivoGlosa).filter(Boolean);
+      if (motivos.length) f.motivo_glosa = [f.motivo_glosa].concat(motivos).filter(Boolean).join(' | ');
+      const guia = it.linhas.map(l => l.guia).find(Boolean);
+      if (guia && !f.guia_operadora) f.guia_operadora = guia;
       const prev = Number(f.valor_previsto) || 0;
-      f.status = (!prev || recebido >= prev - 0.05) ? 'recebido' : 'parcial';
+      f.status = (!prev || recebido >= prev - 0.05) ? 'recebido' : (recebido <= 0.005 && it.glosa > 0.005 ? 'glosado' : 'parcial');
       try { f.pago = financeiro.ehQuitado(f.status); } catch (e) { f.pago = f.status === 'recebido'; }
       f._conciliacoes = (f._conciliacoes || []).concat([{ chave, fonte: ext.fonte, competencia: ext.competencia, refs: it.linhas.map(l => l.ref),
         valor: it.pago, glosa: it.glosa, data, em: new Date().toISOString(), arquivo: ext.arquivo || '' }]);
